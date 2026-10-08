@@ -585,12 +585,21 @@ function sessionAdvance(){
   renderSession();
 }
 
-function sessionSetSeen(f, val){
-  const st = cardState(f.slug);
-  if(st.status !== val) setStatus(f, val);
-  session.stats[val === 'seen' ? 'seen' : 'unseen']++;
+function sessionMarkSeen(f){
+  if(cardState(f.slug).status !== 'seen') setStatus(f, 'seen');
+  session.stats.seen++;
   session.stage = 'rate';
   renderSession();
+}
+
+// Left arrow is a one-key shortcut for the single most common triage call:
+// haven't seen it, don't want to -- interest=1, the bottom of the same
+// want-to-see scale the number keys set. Settled in one keystroke, with no
+// follow-up rating step, so the hand never has to leave the home position.
+function sessionMarkDontCare(f){
+  update(f, {status:'unseen', rating:null, interest:1, never:false});
+  session.stats.unseen++;
+  sessionAdvance();
 }
 
 function sessionRate(f, i){
@@ -611,8 +620,8 @@ function sessionKeydown(e){
   if(session.idx >= session.queue.length) return; // done screen: only Escape does anything
   const f = session.queue[session.idx];
   if(session.stage === 'seen'){
-    if(e.key === 'ArrowLeft'){ e.preventDefault(); sessionSetSeen(f, 'unseen'); }
-    else if(e.key === 'ArrowRight'){ e.preventDefault(); sessionSetSeen(f, 'seen'); }
+    if(e.key === 'ArrowLeft'){ e.preventDefault(); sessionMarkDontCare(f); }
+    else if(e.key === 'ArrowRight'){ e.preventDefault(); sessionMarkSeen(f); }
   } else if(session.stage === 'rate'){
     if(/^[1-5]$/.test(e.key)){ e.preventDefault(); sessionRate(f, parseInt(e.key, 10)); }
     else if(e.key.toLowerCase() === 'x'){ e.preventDefault(); sessionNever(f); }
@@ -654,13 +663,13 @@ function renderSession(){
   if(session.stage === 'seen'){
     stage.appendChild(el('div','session-prompt','Seen it?'));
     const row = el('div','session-row');
-    const no = el('button','session-big no','← No, haven’t seen it');
-    no.onclick = () => sessionSetSeen(f, 'unseen');
+    const no = el('button','session-big no','← Don’t care to see it');
+    no.onclick = () => sessionMarkDontCare(f);
     const yes = el('button','session-big yes','Yes, seen it →');
-    yes.onclick = () => sessionSetSeen(f, 'seen');
+    yes.onclick = () => sessionMarkSeen(f);
     row.appendChild(no); row.appendChild(yes);
     stage.appendChild(row);
-    stage.appendChild(el('div','session-hint','← / → keys, or click'));
+    stage.appendChild(el('div','session-hint','← don\u2019t care to see it (done) \u00b7 \u2192 seen it, rate next \u00b7 or click'));
   } else {
     const seen = cardState(f.slug).status === 'seen';
     stage.appendChild(el('div','session-prompt', seen ? 'How much did you enjoy it?' : 'How much do you want to see it?'));
