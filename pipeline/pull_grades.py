@@ -1,8 +1,11 @@
-"""Merge a grades dump pulled from the artifact's db into out/grades.csv, and
-write out/watchlist.csv.
+"""Merge graded rows into out/grades.csv, and write out/watchlist.csv.
 
-Input: the "grades" collection, fetched via the ArtifactData tool -- either a
-JSON array of docs, or the directory of <slug>.json files its `out_dir` writes.
+  python3 pipeline/pull_grades.py              -- read data/grades.db (self-hosted MODE=local)
+  python3 pipeline/pull_grades.py dump.json    -- read a JSON array (MODE=artifact: the
+    "grades" collection via the ArtifactData tool)
+  python3 pipeline/pull_grades.py dump_dir/    -- read a directory of <slug>.json docs
+    (same tool, with out_dir set)
+
 Each doc carries {slug, grade, status, rating, interest, never}: `status` is
 "seen" / "unseen" / null, and `grade` is the pre-split star (see
 common.verdict for how they combine).
@@ -11,6 +14,7 @@ import csv
 import glob
 import json
 import os
+import sqlite3
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -28,13 +32,27 @@ def load_dump(path):
         return json.load(fh)
 
 
+def load_local_db():
+    path = os.path.join(common.DATA, "grades.db")
+    if not os.path.exists(path):
+        sys.exit("no data/grades.db yet -- grade something in the local server first, "
+                  "or pass an artifact dump path")
+    conn = sqlite3.connect(path)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(grades)")]
+    rows = conn.execute("SELECT %s FROM grades" % ", ".join(cols)).fetchall()
+    conn.close()
+    return [dict(zip(cols, row)) for row in rows]
+
+
 def cell(v):
     return "" if v is None or v is False else v
 
 
 def main():
-    dump_path = sys.argv[1] if len(sys.argv) > 1 else "/tmp/grades_dump.json"
-    dump = {r["slug"]: r for r in load_dump(dump_path)}
+    dump_path = sys.argv[1] if len(sys.argv) > 1 else None
+    docs = load_dump(dump_path) if dump_path else load_local_db()
+    dump = {r["slug"]: r for r in docs}
+    source = dump_path or os.path.join(common.DATA, "grades.db")
 
     with open(os.path.join(common.DATA, "scores.json"), encoding="utf-8") as fh:
         S = json.load(fh)
@@ -80,7 +98,7 @@ def main():
         if v:
             kinds[v[0]] = kinds.get(v[0], 0) + 1
     print("merged %d rows from %s into %s (%d total rows)"
-          % (len(dump), dump_path, gpath, len(merged)))
+          % (len(dump), source, gpath, len(merged)))
     print("  seen+rated %d · unseen interest %d · never %d · untriaged old grade %d"
           % tuple(kinds.get(k, 0) for k in ("rating", "interest", "never", "legacy")))
 
