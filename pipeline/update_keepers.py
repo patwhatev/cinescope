@@ -1,4 +1,5 @@
-"""Append newly-kept films (grade >= 4 in out/grades.csv) to KEEPERS.md.
+"""Append newly-kept films (seen and rated >= 4 in out/grades.csv, or an
+untriaged old grade >= 4) to KEEPERS.md.
 
 Idempotent: a slug already anywhere in KEEPERS.md is skipped, so re-running
 after pull_grades.py only ever adds the delta. Run order each round:
@@ -27,8 +28,7 @@ def main():
     if not os.path.exists(gpath):
         sys.exit("no grades.csv yet")
     with open(gpath, encoding="utf-8") as fh:
-        rows = [r for r in csv.DictReader(fh) if (r.get("grade") or "").strip()
-                 and float(r["grade"]) >= 4]
+        rows = [r for r in csv.DictReader(fh) if common.seed_tier(r)]
 
     text = open(PATH, encoding="utf-8").read() if os.path.exists(PATH) else (
         "# Keepers\n\nThe running list of films confirmed via Dailies grading.\n")
@@ -38,13 +38,13 @@ def main():
         print("nothing new — %d kept films already on the list" % len(have))
         return
 
-    new.sort(key=lambda r: (-float(r["grade"]), -float(r["score"] or 0)))
+    new.sort(key=lambda r: (-common.seed_tier(r), -float(r["score"] or 0)))
     iters = len(re.findall(r"^## Iteration", text, re.M))
     today = datetime.date.today().isoformat()
     lines = ["\n## Iteration %02d — %s, %d newly kept\n" % (iters + 1, today, len(new)),
               "| Film | Year | Weight | Score | |", "|---|---|---|---|---|"]
     for r in new:
-        weight = "heavy (1.0)" if float(r["grade"]) >= 5 else "light (0.5)"
+        weight = "heavy (1.0)" if common.seed_tier(r) == 1.0 else "light (0.5)"
         lines.append("| %s | %s | %s | %s | <!--slug:%s--> |"
                       % (r["title"], r["year"], weight, r["score"], r["slug"]))
 

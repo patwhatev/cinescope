@@ -22,7 +22,8 @@ def main():
         S = json.load(fh)
     films = common.load_films()
     top = int(os.environ.get("BUILD_TOP", "80"))
-    slugs = [f["slug"] for f in S["films"][:top]]
+    slugs = [f["slug"] for f in common.select_for_reel(S["films"], top)]
+    slugs += common.triage_slugs(slugs)
 
     os.makedirs(OUTDIR, exist_ok=True)
     got = skip = miss = 0

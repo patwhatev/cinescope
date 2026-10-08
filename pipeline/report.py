@@ -139,8 +139,7 @@ def main():
         with open(gpath, encoding="utf-8") as fh:
             for row in csv.DictReader(fh):
                 existing[row["slug"]] = row
-    cols = ["rank", "slug", "title", "year", "score", "g", "t", "p", "q",
-            "grade", "seen", "note"]
+    cols = common.GRADE_COLS
     with open(gpath, "w", encoding="utf-8", newline="") as fh:
         wr = csv.DictWriter(fh, fieldnames=cols)
         wr.writeheader()
@@ -149,15 +148,15 @@ def main():
             rank += 1
             old = existing.get(f["slug"], {})
             c = f["channels"]
-            wr.writerow({"rank": rank, "slug": f["slug"], "title": f["title"],
-                         "year": f["year"], "score": f["score"],
-                         "g": c["g"], "t": c["t"], "p": c["p"], "q": c["q"],
-                         "grade": old.get("grade", ""), "seen": old.get("seen", ""),
-                         "note": old.get("note", "")})
+            row = {k: old.get(k, "") for k in cols}
+            row.update({"rank": rank, "slug": f["slug"], "title": f["title"],
+                        "year": f["year"], "score": f["score"],
+                        "g": c["g"], "t": c["t"], "p": c["p"], "q": c["q"]})
+            wr.writerow(row)
         # keep any rows you already graded that are no longer in the top slice
         for slug, old in existing.items():
             if slug not in {f["slug"] for f in S["films"][:TOP]} and (
-                    old.get("grade") or old.get("seen")):
+                    common.verdict(old) or old.get("seen")):
                 wr.writerow({k: old.get(k, "") for k in cols})
 
     print("wrote %s" % path)

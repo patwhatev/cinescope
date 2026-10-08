@@ -1,8 +1,9 @@
 """Grade the recommender against your verdicts, and propose better weights.
 
-Fill in the `grade` column of out/grades.csv (1-5, where 5 = exactly my thing,
-1 = nothing like me) and optionally `seen` (y) for ones you had already
-watched. Then:  python3 pipeline/tune.py [--apply]
+Reads every verdict in out/grades.csv (see common.verdict): a seen film's
+enjoyment rating and a `never` count at full weight, an unseen film's
+want-to-see interest at half weight, an untriaged old grade at full weight.
+Then:  python3 pipeline/tune.py [--apply]
 
 Reports precision@k, per-channel discrimination, score calibration, and a
 proposed reweighting. --apply writes the new weights into config.json.
@@ -20,14 +21,17 @@ CH = ("g", "t", "p", "q")
 NAMES = {"g": "graph", "t": "theme", "p": "people", "q": "quality"}
 
 
-def pearson(xs, ys):
+def pearson(xs, ys, ws=None):
     n = len(xs)
     if n < 3:
         return 0.0
-    mx, my = sum(xs) / n, sum(ys) / n
-    num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
-    dx = math.sqrt(sum((x - mx) ** 2 for x in xs))
-    dy = math.sqrt(sum((y - my) ** 2 for y in ys))
+    ws = ws or [1.0] * n
+    tw = sum(ws)
+    mx = sum(w * x for w, x in zip(ws, xs)) / tw
+    my = sum(w * y for w, y in zip(ws, ys)) / tw
+    num = sum(w * (x - mx) * (y - my) for w, x, y in zip(ws, xs, ys))
+    dx = math.sqrt(sum(w * (x - mx) ** 2 for w, x in zip(ws, xs)))
+    dy = math.sqrt(sum(w * (y - my) ** 2 for w, y in zip(ws, ys)))
     return num / (dx * dy) if dx and dy else 0.0
 
 
@@ -42,18 +46,12 @@ def main():
     rows = []
     with open(gpath, encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
-            g = (r.get("grade") or "").strip()
-            if not g:
-                continue
-            try:
-                grade = float(g)
-            except ValueError:
-                continue
+            v = common.verdict(r)
             f = byslug.get(r["slug"])
-            if not f:
+            if not v or not f:
                 continue
-            rows.append((int(r["rank"] or 0), r["slug"], r["title"], grade,
-                         f["score"], f["channels"], r.get("seen", "")))
+            rows.append((int(r["rank"] or 0), r["slug"], r["title"], v[1],
+                         f["score"], f["channels"], v[0], v[2]))
     if len(rows) < 5:
         sys.exit("only %d graded rows — grade at least ~15 for signal" % len(rows))
 
@@ -67,9 +65,12 @@ def main():
     print("hit rate (>=4)    %.0f%%  (%d/%d)" % (100.0 * len(hits) / graded,
                                                  len(hits), graded))
     print("miss rate (<=2)   %.0f%%" % (100.0 * sum(1 for r in rows if r[3] <= 2) / graded))
-    seen = sum(1 for r in rows if (r[6] or "").lower().startswith("y"))
-    print("already seen      %d  (%.0f%% — high is good targeting, bad novelty)"
-          % (seen, 100.0 * seen / graded))
+    kinds = {k: sum(1 for r in rows if r[6] == k)
+             for k in ("rating", "interest", "never", "legacy")}
+    print("seen + rated      %d  (%.0f%% — high is good targeting, bad novelty)"
+          % (kinds["rating"], 100.0 * kinds["rating"] / graded))
+    print("unseen interest   %d  (weighted %.1f)   never %d   untriaged old grade %d"
+          % (kinds["interest"], common.INTEREST_WEIGHT, kinds["never"], kinds["legacy"]))
     print()
 
     for k in (10, 20, 40):
@@ -82,12 +83,13 @@ def main():
 
     print("-- channel discrimination (corr with your grade) " + "-" * 17)
     grades = [r[3] for r in rows]
+    weights = [r[7] for r in rows]
     corrs = {}
     for c in CH:
-        corrs[c] = pearson([r[5][c] for r in rows], grades)
+        corrs[c] = pearson([r[5][c] for r in rows], grades, weights)
         bar = "#" * int(abs(corrs[c]) * 30)
         print("  %-8s r=%+.3f  %s" % (NAMES[c], corrs[c], bar))
-    print("  %-8s r=%+.3f" % ("SCORE", pearson([r[4] for r in rows], grades)))
+    print("  %-8s r=%+.3f" % ("SCORE", pearson([r[4] for r in rows], grades, weights)))
     print()
 
     print("-- calibration (does a higher score mean a better film for you?) --")
@@ -118,13 +120,13 @@ def main():
     print("-- worst misses (retune targets) " + "-" * 32)
     for r in sorted(rows, key=lambda x: (x[3], -x[4]))[:6]:
         if r[3] <= 2:
-            print("  grade %.0f  score %5.1f  %-38s %s" % (
-                r[3], r[4], r[2][:38],
+            print("  %-8s %.0f  score %5.1f  %-38s %s" % (
+                r[6], r[3], r[4], r[2][:38],
                 " ".join("%s=%.2f" % (c, r[5][c]) for c in CH)))
     print()
-    print("-- promote to seeds (graded 5) " + "-" * 34)
+    print("-- promote to seeds (seen, rated 5) " + "-" * 29)
     for r in rows:
-        if r[3] >= 5:
+        if r[3] >= 5 and r[6] in ("rating", "legacy"):
             print("  %-34s | 1.0 | from iteration grading" % r[1])
 
     if "--apply" in sys.argv:

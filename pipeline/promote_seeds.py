@@ -4,6 +4,9 @@
 4 stars -> weight 0.5 (light: moves the model, but half as hard).
 <=3     -> not promoted.
 
+Only films you've seen promote (or an old pre-split grade not yet triaged):
+a want-to-see score is a guess about taste, so it never becomes a seed.
+
 Everything above the "# --- promoted from grading ---" marker in seeds.txt is
 yours — hand-authored seeds are never touched. Everything below it is fully
 regenerated from grades.csv on every run, so lowering a star later removes
@@ -29,13 +32,10 @@ def main():
 
     promoted = []
     for r in rows:
-        g = (r.get("grade") or "").strip()
-        if not g:
-            continue
-        g = float(g)
-        if g == 5:
+        tier = common.seed_tier(r)
+        if tier == 1.0:
             promoted.append((r["slug"], 1.0, r["title"], "heavy"))
-        elif g == 4:
+        elif tier == 0.5:
             promoted.append((r["slug"], 0.5, r["title"], "light"))
 
     text = open(PATH, encoding="utf-8").read() if os.path.exists(PATH) else ""

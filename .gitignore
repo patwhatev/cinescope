@@ -1,0 +1,7 @@
+# Regenerable from the network (fetch.py / fetch_posters.py) -- large,
+# binary/semi-binary, not worth versioning. Everything else under data/
+# (films.jsonl, scores.json, people.json, grades.db) is real state, tracked.
+/data/cache/
+/data/posters/
+__pycache__/
+*.pyc

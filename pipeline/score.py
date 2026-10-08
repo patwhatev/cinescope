@@ -63,10 +63,10 @@ def graded():
     if os.path.exists(path):
         with open(path, encoding="utf-8") as fh:
             for row in csv.DictReader(fh):
-                g = (row.get("grade") or "").strip()
+                v = common.verdict(row)
                 seen = (row.get("seen") or "").strip().lower() in ("y", "yes", "1", "true")
-                if g or seen:
-                    out[row["slug"]] = {"grade": float(g) if g else None, "seen": seen}
+                if v or seen:
+                    out[row["slug"]] = {"grade": v[1] if v else None, "seen": seen}
     return out
 
 

@@ -1,3 +1,4 @@
+import csv
 import json
 import os
 import re
@@ -61,3 +62,90 @@ def is_junk(rec, min_count):
 
 def label(rec):
     return "%s (%s)" % (rec.get("title") or rec["slug"], rec.get("year") or "?")
+
+
+def select_for_reel(films_sorted, top):
+    """Fresh (ungraded) candidates lead; already-graded films trail so a
+    revisit is still possible but never crowds out new material. Shared by
+    build_ui.py and fetch_posters.py so their film lists can't drift apart.
+    """
+    fresh = [f for f in films_sorted if not f["already_graded"]]
+    reviewed = [f for f in films_sorted if f["already_graded"]]
+    return (fresh + reviewed)[:top]
+
+
+# ---- verdicts ---------------------------------------------------------------
+# A grade is one of two different questions, depending on whether you've seen
+# the film: "how much did you enjoy it" (rating) or "how much do you want to
+# see it" (interest, or a hard `never`). `grade` is the pre-split 1-5 star,
+# kept as-is so an untriaged row still means what it meant before.
+
+GRADE_COLS = ["rank", "slug", "title", "year", "score", "g", "t", "p", "q",
+              "grade", "seen", "rating", "interest", "never", "note"]
+
+INTEREST_WEIGHT = 0.5   # want-to-see is a guess about taste, not a verdict on it
+
+
+def _num(v):
+    try:
+        return float(str(v).strip()) if v not in (None, "") else None
+    except ValueError:
+        return None
+
+
+def _flag(v):
+    return (v or "").strip().lower() in ("y", "yes", "1", "true")
+
+
+def verdict(row):
+    """One grades.csv row -> (kind, value 1-5, weight), or None if ungraded.
+
+      seen + rating      -> ("rating",   rating,   1.0)  enjoyment; can seed
+      unseen + never     -> ("never",    1,        1.0)  a hard no
+      unseen + interest  -> ("interest", interest, 0.5)  watchlist; never seeds
+      only an old grade  -> ("legacy",   grade,    1.0)  pre-split, ambiguous
+    """
+    seen = (row.get("seen") or "").strip().lower()
+    rating, interest = _num(row.get("rating")), _num(row.get("interest"))
+    if seen.startswith("y") and rating:
+        return ("rating", rating, 1.0)
+    if seen.startswith("n") and _flag(row.get("never")):
+        return ("never", 1.0, 1.0)
+    if seen.startswith("n") and interest:
+        return ("interest", interest, INTEREST_WEIGHT)
+    grade = _num(row.get("grade"))
+    if grade:
+        return ("legacy", grade, 1.0)
+    return None
+
+
+def seed_tier(row):
+    """1.0 / 0.5 seed weight for a film you've enjoyed, else None. Only seen
+    ratings (or an untriaged old grade) promote — interest never does."""
+    v = verdict(row)
+    if not v or v[0] not in ("rating", "legacy"):
+        return None
+    return 1.0 if v[1] >= 5 else 0.5 if v[1] >= 4 else None
+
+
+def read_grades():
+    path = os.path.join(OUT, "grades.csv")
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as fh:
+        return {r["slug"]: r for r in csv.DictReader(fh)}
+
+
+def triage_slugs(reel_slugs):
+    """Graded slugs the reel doesn't carry (promoted seeds, films that fell out
+    of the top slice), so they can still be re-triaged. Reads grades.csv, plus
+    a raw db dump at $GRADES_DUMP for grades not yet pulled."""
+    slugs = set(read_grades())
+    dump = os.environ.get("GRADES_DUMP")
+    if dump:
+        if os.path.isdir(dump):
+            slugs |= {n[:-5] for n in os.listdir(dump) if n.endswith(".json")}
+        else:
+            with open(dump, encoding="utf-8") as fh:
+                slugs |= {r["slug"] for r in json.load(fh)}
+    return sorted(slugs - set(reel_slugs))

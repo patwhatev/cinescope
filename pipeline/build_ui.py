@@ -1,9 +1,16 @@
-"""Render data/scores.json into the Dailies grading artifact (out/dailies.html).
+"""Render data/scores.json into the Dailies grading page (out/dailies.html).
 
 Static HTML/CSS/JS, no build step, no library. The film pool is baked in as a
-JSON blob at publish time; grading state lives in the artifact's own `db`
-capability so it persists across sessions and is readable back by the
-pipeline (see pipeline/pull_grades.py).
+JSON blob at publish time. Grading state's storage is swappable via MODE:
+
+  MODE=artifact (default) -- writes through the Claude Artifact `db`
+    capability. Only works served from claude.ai.
+  MODE=local -- writes through a tiny JSON API (see pipeline/serve.py),
+    for self-hosting. Run pipeline/serve.py and open http://localhost:8420.
+
+Either way the film data and grading UI are identical; only the storage
+backend's ~20 lines of JS differ (see ARTIFACT_BACKEND_JS / LOCAL_BACKEND_JS
+below). pipeline/pull_grades.py reads the result back for tuning either way.
 """
 import json
 import os
@@ -14,6 +21,7 @@ import common
 
 BUILD_TOP = int(os.environ.get("BUILD_TOP", "80"))
 ITER = os.environ.get("ITER", "01")
+MODE = os.environ.get("MODE", "artifact")
 
 
 def main():
@@ -23,13 +31,24 @@ def main():
 
     # Fresh candidates lead; anything already starred keeps a trailing slot so
     # it's still visible (dimmed, stamped) if you want to revisit a weight.
-    fresh = [f for f in S["films"] if not f["already_graded"]]
-    reviewed = [f for f in S["films"] if f["already_graded"]]
-    selected = (fresh + reviewed)[:BUILD_TOP]
+    selected = common.select_for_reel(S["films"], BUILD_TOP)
+
+    # Anything graded that the reel doesn't carry -- promoted seeds, films
+    # that fell out of the top slice -- trails at the end so it can still be
+    # re-triaged as seen / unseen. Seeds aren't scored, so they come straight
+    # from films.jsonl with no channel data.
+    byslug = {f["slug"]: f for f in S["films"]}
+    recs = common.load_films()
+    triage = []
+    for slug in common.triage_slugs([f["slug"] for f in selected]):
+        if slug in byslug:
+            triage.append(byslug[slug])
+        elif slug in recs:
+            triage.append(unscored(recs[slug]))
 
     poster_dir = os.path.join(common.DATA, "posters")
     films = []
-    for f in selected:
+    for f in selected + triage:
         c = f["channels"]
         has_poster = os.path.exists(os.path.join(poster_dir, f["slug"] + ".jpg"))
         films.append({
@@ -44,6 +63,7 @@ def main():
             "synopsis": f.get("synopsis") or "",
             "runtime": f.get("runtime"),
             "poster": ("posters/%s.jpg" % f["slug"]) if has_poster else None,
+            "triage": f in triage,
         })
 
     people = [p for p in S["people"][:16] if p["score"] >= 0.5]
@@ -55,7 +75,11 @@ def main():
     }
     data_json = json.dumps(payload, ensure_ascii=False)
 
-    html = HTML_TEMPLATE.replace("__DATA_JSON__", data_json).replace("__ITER__", ITER)
+    backend_js = LOCAL_BACKEND_JS if MODE == "local" else ARTIFACT_BACKEND_JS
+    html = (HTML_TEMPLATE
+            .replace("__DATA_JSON__", data_json)
+            .replace("__ITER__", ITER)
+            .replace("__BACKEND_JS__", backend_js))
 
     os.makedirs(common.OUT, exist_ok=True)
     out_path = os.path.join(common.OUT, "dailies.html")
@@ -63,8 +87,27 @@ def main():
         fh.write(html)
 
     n_posters = sum(1 for f in films if f["poster"])
-    print("wrote %s (%d films, %d with posters, %d bytes of embedded data)"
-          % (out_path, len(films), n_posters, len(data_json)))
+    print("wrote %s [mode=%s] (%d films + %d to re-triage, %d with posters, "
+          "%d bytes of embedded data)"
+          % (out_path, MODE, len(selected), len(triage), n_posters, len(data_json)))
+
+
+def unscored(rec):
+    """A films.jsonl record shaped like a scores.json entry, for a graded film
+    that isn't a candidate any more (i.e. it was promoted to a seed)."""
+    names = lambda k: [n for _, n in rec.get(k) or []]
+    return {
+        "slug": rec["slug"], "title": rec.get("title") or rec["slug"],
+        "year": rec.get("year"), "score": None,
+        "channels": {"g": 0, "t": 0, "p": 0, "q": 0}, "pop_adj": None,
+        "rating": rec.get("rating"), "rating_count": rec.get("rating_count"),
+        "genres": names("genres"), "mini_themes": names("mini_themes"),
+        "directors": names("directors"), "cast": names("cast")[:6],
+        "cast_billed": rec.get("cast_billed"),
+        "via_seeds": [], "shared_tokens": [], "via_people": [],
+        "imdb": rec.get("imdb"), "tmdb": rec.get("tmdb"),
+        "synopsis": rec.get("synopsis"), "runtime": rec.get("runtime"),
+    }
 
 
 HTML_TEMPLATE = r"""<title>Dailies</title>
@@ -164,6 +207,8 @@ details.method[open] summary::before{transform:rotate(90deg)}
 .card.heavy{border-color:var(--plus); box-shadow:var(--shadow), inset 3px 0 0 -1px var(--plus)}
 .card.light{border-color:var(--teal)}
 .card.minus{opacity:.46}
+.card.cold{opacity:.7}
+.card.want{border-color:var(--accent)}
 .card .sprockets{position:absolute; left:0; top:0; bottom:0; width:12px;
   background-image:radial-gradient(circle, var(--sprocket) 2.5px, transparent 2.6px);
   background-size:12px 16px; background-position:center top 10px; background-repeat:repeat-y;
@@ -190,6 +235,9 @@ details.method[open] summary::before{transform:rotate(90deg)}
 .stamp.light{color:var(--teal); background:var(--teal-soft)}
 .stamp.minus{color:var(--minus); background:var(--minus-soft)}
 .stamp.maybe{color:var(--text-faint); background:var(--surface-2)}
+.stamp.want{color:var(--accent-strong); background:var(--accent-soft)}
+.stamp.cold{color:var(--text-dim); background:var(--surface-2)}
+.stamp.hint{color:var(--text-faint); background:transparent; border:1px dashed var(--border); font-weight:600}
 
 .meter{display:flex; gap:3px; margin-top:10px; align-items:center}
 .meter .seg{display:flex; align-items:center; gap:4px}
@@ -209,14 +257,28 @@ details.method[open] summary::before{transform:rotate(90deg)}
 .stars button.lit{color:var(--accent)}
 .stars button.lit.weak{color:var(--teal)}
 .stars button.lit.bad{color:var(--minus)}
-.stars-label{font-size:11.5px; color:var(--text-faint); min-width:7.5em}
 .btn{font-family:"IBM Plex Sans",sans-serif; font-size:13px; font-weight:600; border-radius:20px;
   padding:7px 15px; border:1px solid var(--border); background:var(--surface-2); color:var(--text);
   cursor:pointer; display:flex; align-items:center; gap:6px; transition:all .12s}
 .btn:hover{filter:brightness(1.05)}
 .btn:active{transform:scale(.97)}
-.btn.seen{margin-left:auto; background:transparent; font-weight:500; color:var(--text-faint)}
-.btn.seen.active-seen{color:var(--teal); border-color:var(--teal); background:var(--teal-soft)}
+.seen-q{display:flex; align-items:center; gap:6px}
+.seen-q .q{font-size:12.5px; color:var(--text-dim); font-weight:600; margin-right:2px}
+.seg{font-family:"IBM Plex Sans",sans-serif; font-size:12.5px; font-weight:600; padding:5px 13px;
+  border:1px solid var(--border); background:transparent; color:var(--text-dim); cursor:pointer;
+  border-radius:20px; transition:all .12s}
+.seg:hover{color:var(--text)}
+.seg.on.yes{color:var(--teal); border-color:var(--teal); background:var(--teal-soft)}
+.seg.on.no{color:var(--accent-strong); border-color:var(--accent); background:var(--accent-soft)}
+.pips button{font-size:15px; padding:4px 3px}
+.pips button.lit{color:var(--accent)}
+.pips button.lit.bad{color:var(--text-faint)}
+.scale-lab{font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--text-faint); margin-right:4px}
+.btn.never{background:transparent; font-weight:500; color:var(--text-faint); padding:5px 12px; font-size:12.5px}
+.btn.never.on{color:var(--minus); border-color:var(--minus); background:var(--minus-soft)}
+.hint{font-size:11.5px; color:var(--text-faint)}
+.triage-head{margin:26px 0 4px; font-size:12px; letter-spacing:.12em; text-transform:uppercase;
+  color:var(--text-faint); font-weight:600}
 .btn[disabled]{opacity:.5; cursor:wait}
 .gen-tags{font-size:11.5px; color:var(--text-faint); margin-left:2px}
 
@@ -230,7 +292,7 @@ footer{margin-top:40px; padding-top:18px; border-top:1px solid var(--border);
   .poster{width:52px; height:78px}
   .synopsis{max-width:none}
   .stars button{font-size:18px}
-  .stars-label{min-width:0; width:100%; order:10}
+  .hint{width:100%; order:10}
 }
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -242,8 +304,8 @@ footer{margin-top:40px; padding-top:18px; border-top:1px solid var(--border);
     <div>
       <div class="eyebrow">Reel __ITER__ &middot; Screening Notes</div>
       <h1>Dailies</h1>
-      <div class="sub">Candidates pulled from your letterboxd taste graph. Star each one &mdash;
-        5&#9733; feeds back heavy, 4&#9733; light, 1&ndash;2&#9733; is a pass &mdash; every call retunes the next reel.</div>
+      <div class="sub">Candidates pulled from your letterboxd taste graph. Seen it? Star how much you
+        enjoyed it. Not yet? Say how much you want to &mdash; or mark it never.</div>
     </div>
     <div class="stats">
       <div class="stat"><div class="n mono" id="stat-pool">&ndash;</div><div class="l">pool</div></div>
@@ -269,21 +331,25 @@ footer{margin-top:40px; padding-top:18px; border-top:1px solid var(--border);
         <div class="ch"><span class="sw" style="background:var(--text-faint)"></span>
           <b>quality</b>&nbsp;&mdash; letterboxd rating, shrunk toward the mean by rating count</div>
       </div>
-      <div style="margin-top:8px"><b>Stars feed the next crawl directly:</b> 5&#9733; promotes a film
-        into the seed set at full weight, 4&#9733; at half weight, 3&#9733; is noted but not promoted,
-        1&ndash;2&#9733; trains the channel weights as a miss. Change your mind any time &mdash; the
-        star you set is the star that's stored.</div>
+      <div style="margin-top:8px"><b>Seen it &mdash; stars are enjoyment.</b> 5&#9733; promotes the film
+        into the seed set at full weight, 4&#9733; at half weight, 3&#9733; is noted, 1&ndash;2&#9733;
+        trains the channel weights as a miss.</div>
+      <div style="margin-top:8px"><b>Not seen &mdash; dots are want-to-see.</b> They train the weights
+        at half strength (a guess about taste isn't a verdict on it) and never become seeds;
+        3&ndash;5 lands on your watchlist. <b>Never</b> counts as a firm miss.</div>
+      <div style="margin-top:8px">Cards graded before this split show their old star as a dashed
+        hint and count as unreviewed until you answer &ldquo;seen it?&rdquo;. Change your mind any time.</div>
       <div style="margin-top:8px">Note: letterboxd files a few limited series (Twin Peaks: The Return,
         Baby Reindeer) under /film/ &mdash; pass on those if TV isn't what you're after.</div>
     </div>
   </details>
 
   <div class="tally">
-    <div class="t-item">&#9733;&#9733;&#9733;&#9733;&#9733; heavy <b id="t-heavy">0</b></div>
-    <div class="t-item">&#9733;&#9733;&#9733;&#9733; light <b id="t-light">0</b></div>
-    <div class="t-item">&minus; passed <b id="t-minus">0</b></div>
-    <div class="t-item">already seen <b id="t-seen">0</b></div>
-    <div class="t-item">graded <b id="t-graded">0</b> / <span id="t-total" class="mono">0</span></div>
+    <div class="t-item">seen &amp; rated <b id="t-rated">0</b></div>
+    <div class="t-item">watchlist <b id="t-watch">0</b></div>
+    <div class="t-item">never <b id="t-never">0</b></div>
+    <div class="t-item">to re-triage <b id="t-legacy">0</b></div>
+    <div class="t-item">reviewed <b id="t-graded">0</b> / <span id="t-total" class="mono">0</span></div>
     <div class="spacer"></div>
     <label><input type="checkbox" id="hide-reviewed"> hide reviewed</label>
   </div>
@@ -293,16 +359,16 @@ footer{margin-top:40px; padding-top:18px; border-top:1px solid var(--border);
   <div class="reel" id="reel"></div>
 
   <footer>
-    Grades save to this page's own store &mdash; they sync back across sessions and
-    are what the next reel is cut from. Toggling a call off returns a card to neutral.
+    Calls save to this page's own store &mdash; they sync back across sessions and
+    are what the next reel is cut from. Tapping a lit call again clears it.
   </footer>
 </div>
 
 <script>
 const DATA = __DATA_JSON__;
-let grades = {}; // slug -> {grade, seen}
-let db = null;
-const pending = new Set();
+// slug -> {grade, status, rating, interest, never}. `grade` is the pre-split
+// star; `status` is 'seen' | 'unseen' | null.
+let grades = {};
 
 function $(s, el=document){ return el.querySelector(s); }
 function el(tag, cls, html){ const e=document.createElement(tag); if(cls) e.className=cls; if(html!=null) e.innerHTML=html; return e; }
@@ -336,7 +402,16 @@ function why(f){
   return bits.join(' &middot; ') || 'theme-vector match only';
 }
 
-function cardState(slug){ return grades[slug] || {grade:null, seen:false}; }
+function normalize(v){
+  return {grade: v.grade ?? null, status: v.status ?? null, rating: v.rating ?? null,
+          interest: v.interest ?? null, never: !!v.never};
+}
+function cardState(slug){ return grades[slug] || normalize({}); }
+function isReviewed(st){
+  if(st.status === 'seen') return !!st.rating;
+  if(st.status === 'unseen') return !!(st.interest || st.never);
+  return false;
+}
 
 function runtimeStr(mins){
   if(!mins) return null;
@@ -344,11 +419,28 @@ function runtimeStr(mins){
   return h ? `${h}h ${m}m` : `${m}m`;
 }
 
-function gradeLabel(g){
-  if(g===5) return {cls:'heavy', stamp:'kept — heavy', note:'weighs heavy as a seed'};
-  if(g===4) return {cls:'light', stamp:'kept — light', note:'weighs light as a seed'};
-  if(g===3) return {cls:'', stamp:'maybe', note:'noted, not promoted'};
-  if(g) return {cls:'minus', stamp:'passed', note:''};
+const RATING_TIPS = {5:'loved it — weighs heavy as a seed', 4:'liked it — weighs light as a seed',
+  3:'fine — noted, not promoted', 2:'didn\'t like it', 1:'hated it'};
+const INTEREST_TIPS = {5:'must see', 4:'keen', 3:'maybe', 2:'doubt it', 1:'barely'};
+
+function verdictLabel(st){
+  if(st.status === 'seen'){
+    const r = st.rating;
+    if(r===5) return {cls:'heavy', stamp:'loved — heavy seed', note:RATING_TIPS[5]};
+    if(r===4) return {cls:'light', stamp:'liked — light seed', note:RATING_TIPS[4]};
+    if(r===3) return {cls:'', stamp:'seen — fine', note:RATING_TIPS[3]};
+    if(r) return {cls:'minus', stamp:'seen — miss', note:RATING_TIPS[r]};
+    return {cls:'', stamp:null, note:'how much did you enjoy it?'};
+  }
+  if(st.status === 'unseen'){
+    if(st.never) return {cls:'minus', stamp:'never', note:'firm no — off the watchlist'};
+    const i = st.interest;
+    if(i>=4) return {cls:'want', stamp:'watchlist', note:INTEREST_TIPS[i]};
+    if(i===3) return {cls:'', stamp:'watchlist — maybe', note:INTEREST_TIPS[3]};
+    if(i) return {cls:'cold', stamp:'low interest', note:INTEREST_TIPS[i]};
+    return {cls:'', stamp:null, note:'how much do you want to see it?'};
+  }
+  if(st.grade) return {cls:'', stamp:'earlier ' + '\u2605'.repeat(st.grade), stampCls:'hint', note:''};
   return {cls:'', stamp:null, note:''};
 }
 
@@ -356,11 +448,11 @@ function renderCard(f, idx){
   const st = cardState(f.slug);
   const card = el('div','card');
   card.dataset.slug = f.slug;
-  const gl = gradeLabel(st.grade);
+  const gl = verdictLabel(st);
   if(gl.cls) card.classList.add(gl.cls);
   card.appendChild(el('div','sprockets'));
 
-  if(gl.stamp) card.appendChild(el('div','stamp '+(gl.cls||'maybe'), gl.stamp));
+  if(gl.stamp) card.appendChild(el('div','stamp '+(gl.stampCls||gl.cls||'maybe'), gl.stamp));
 
   const poster = el('div','poster');
   if(f.poster){
@@ -378,7 +470,7 @@ function renderCard(f, idx){
   head.innerHTML = `<span class="rank mono">${String(idx+1).padStart(2,'0')}</span>
     <span class="title">${f.title}</span><span class="year">${f.year}</span>`;
   top.appendChild(head);
-  top.appendChild(el('div','score',f.score.toFixed(1)));
+  top.appendChild(el('div','score', f.score==null ? 'seed' : f.score.toFixed(1)));
   body.appendChild(top);
 
   const rt = runtimeStr(f.runtime);
@@ -389,33 +481,61 @@ function renderCard(f, idx){
 
   if(f.synopsis) body.appendChild(el('div','synopsis', f.synopsis));
 
-  body.appendChild(el('div','why', why(f)));
-
-  body.appendChild(el('div','meter',
-    bar('G',f.g,'g')+bar('T',f.t,'t')+bar('P',f.p,'p')+bar('Q',f.q,'q')));
+  if(f.score == null) body.appendChild(el('div','why', 'a seed now &mdash; promoted from an earlier reel'));
+  else {
+    body.appendChild(el('div','why', why(f)));
+    body.appendChild(el('div','meter',
+      bar('G',f.g,'g')+bar('T',f.t,'t')+bar('P',f.p,'p')+bar('Q',f.q,'q')));
+  }
 
   const actions = el('div','actions');
 
-  const stars = el('div','stars');
-  for(let i=1;i<=5;i++){
-    const s = el('button','','&#9733;');
-    s.title = i===5?'heavy — weighs full as a seed' : i===4?'light — weighs half as a seed'
-      : i===3?'maybe — noted, not promoted' : i===2?'not really' : 'pass';
-    if(st.grade && i<=st.grade){
-      s.classList.add('lit');
-      if(st.grade<=2) s.classList.add('bad');
-      else if(st.grade===4) s.classList.add('weak');
-    }
-    s.onclick = () => toggleGrade(f, i);
-    stars.appendChild(s);
+  const q = el('div','seen-q');
+  q.appendChild(el('span','q','Seen it?'));
+  for(const [val, lab, cls] of [['seen','Yes','yes'], ['unseen','No','no']]){
+    const b = el('button','seg '+cls, lab);
+    if(st.status === val) b.classList.add('on');
+    b.onclick = () => setStatus(f, val);
+    q.appendChild(b);
   }
-  actions.appendChild(stars);
-  actions.appendChild(el('span','stars-label', gradeLabel(st.grade).note || 'tap a star to grade'));
+  actions.appendChild(q);
 
-  const seenBtn = el('button','btn seen','already seen');
-  if(st.seen) seenBtn.classList.add('active-seen');
-  seenBtn.onclick = () => toggleSeen(f, seenBtn);
-  actions.appendChild(seenBtn);
+  if(st.status === 'seen'){
+    const stars = el('div','stars');
+    for(let i=1;i<=5;i++){
+      const b = el('button','','&#9733;');
+      b.title = RATING_TIPS[i];
+      if(st.rating && i<=st.rating){
+        b.classList.add('lit');
+        if(st.rating<=2) b.classList.add('bad');
+        else if(st.rating===4) b.classList.add('weak');
+      }
+      b.onclick = () => setRating(f, i);
+      stars.appendChild(b);
+    }
+    actions.appendChild(stars);
+  } else if(st.status === 'unseen'){
+    const pips = el('div','stars pips');
+    pips.appendChild(el('span','scale-lab','want to see'));
+    for(let i=1;i<=5;i++){
+      const b = el('button','','&#9679;');
+      b.title = INTEREST_TIPS[i];
+      if(st.interest && i<=st.interest){
+        b.classList.add('lit');
+        if(st.interest<=2) b.classList.add('bad');
+      }
+      b.onclick = () => setInterest(f, i);
+      pips.appendChild(b);
+    }
+    actions.appendChild(pips);
+    const nv = el('button','btn never','never');
+    nv.title = 'garbage / bad signal / would never watch';
+    if(st.never) nv.classList.add('on');
+    nv.onclick = () => toggleNever(f);
+    actions.appendChild(nv);
+  }
+  const note = gl.note || (st.grade && !st.status ? 'earlier call, before seen/unseen split' : '');
+  if(note) actions.appendChild(el('span','hint', note));
 
   body.appendChild(actions);
   card.appendChild(body);
@@ -425,56 +545,73 @@ function renderCard(f, idx){
 function renderReel(){
   const reel = $('#reel'); reel.innerHTML = '';
   const hideReviewed = $('#hide-reviewed').checked;
+  let headed = false;
   DATA.films.forEach((f, i) => {
     const st = cardState(f.slug);
-    if(hideReviewed && st.grade) return;
+    if(hideReviewed && isReviewed(st)) return;
+    if(f.triage && !headed){
+      reel.appendChild(el('div','triage-head','From earlier reels &mdash; re-triage'));
+      headed = true;
+    }
     reel.appendChild(renderCard(f, i));
   });
   renderTally();
 }
 
+// ---- state changes (storage-agnostic; the backend supplies saveDoc) ----
+function update(f, patch){
+  grades[f.slug] = Object.assign({}, cardState(f.slug), patch);
+  renderReel();
+  writeDoc(f.slug);
+}
+function setStatus(f, val){
+  const st = cardState(f.slug);
+  if(st.status === val) return update(f, {status:null, rating:null, interest:null, never:false});
+  // Switching sides drops the other side's answer, so a stale value can't linger.
+  update(f, val === 'seen' ? {status:'seen', interest:null, never:false}
+                           : {status:'unseen', rating:null});
+}
+function setRating(f, i){ update(f, {rating: cardState(f.slug).rating === i ? null : i}); }
+function setInterest(f, i){ update(f, {interest: cardState(f.slug).interest === i ? null : i, never:false}); }
+function toggleNever(f){ update(f, {never: !cardState(f.slug).never, interest:null}); }
+
+// Writes queue per film rather than dropping while one is in flight -- the
+// seen/unseen flow is two quick taps, and the second must not be lost. Each
+// write sends the state as of when it runs, so the last one always wins.
+const queues = {};
+function writeDoc(slug){
+  const f = DATA.films.find(x=>x.slug===slug);
+  queues[slug] = (queues[slug] || Promise.resolve()).then(() =>
+    saveDoc(slug, Object.assign({slug, title: f?f.title:slug}, cardState(slug), {ts: Date.now()}))
+  ).catch(e => console.warn('grade write failed', e));
+}
+
 function renderTally(){
-  let heavy=0, light=0, minus=0, seen=0, graded=0;
+  let rated=0, watch=0, never=0, legacy=0, graded=0;
   for(const f of DATA.films){
     const st = cardState(f.slug);
-    if(st.grade === 5) heavy++;
-    if(st.grade === 4) light++;
-    if(st.grade && st.grade <= 2) minus++;
-    if(st.seen) seen++;
-    if(st.grade) graded++;
+    if(st.status === 'seen' && st.rating) rated++;
+    if(st.status === 'unseen' && st.interest >= 3) watch++;
+    if(st.status === 'unseen' && st.never) never++;
+    if(st.grade && !isReviewed(st)) legacy++;
+    if(isReviewed(st)) graded++;
   }
-  $('#t-heavy').textContent = heavy;
-  $('#t-light').textContent = light;
-  $('#t-minus').textContent = minus;
-  $('#t-seen').textContent = seen;
+  $('#t-rated').textContent = rated;
+  $('#t-watch').textContent = watch;
+  $('#t-never').textContent = never;
+  $('#t-legacy').textContent = legacy;
   $('#t-graded').textContent = graded;
 }
 
-async function writeDoc(slug, patch){
+__BACKEND_JS__
+</script>
+"""
+
+ARTIFACT_BACKEND_JS = r"""let db = null;
+
+async function saveDoc(slug, body){
   if(!db) return;
-  if(pending.has(slug)) return;
-  pending.add(slug);
-  const f = DATA.films.find(x=>x.slug===slug);
-  const body = Object.assign({slug, title: f?f.title:slug}, cardState(slug), patch, {ts: Date.now()});
-  try{ await db.collection('grades').doc(slug).set(body); }
-  catch(e){ console.warn('grade write failed', e); }
-  pending.delete(slug);
-}
-
-function toggleGrade(f, val){
-  const st = cardState(f.slug);
-  const next = (st.grade === val) ? null : val;
-  grades[f.slug] = Object.assign({}, st, {grade: next});
-  renderReel();
-  writeDoc(f.slug, {grade: next});
-}
-
-function toggleSeen(f, btn){
-  const st = cardState(f.slug);
-  const next = !st.seen;
-  grades[f.slug] = Object.assign({}, st, {seen: next});
-  renderReel();
-  writeDoc(f.slug, {seen: next});
+  await db.collection('grades').doc(slug).set(body);
 }
 
 $('#hide-reviewed').addEventListener('change', renderReel);
@@ -488,16 +625,48 @@ async function boot(){
     if(db){
       db.collection('grades').onSnapshot(snap => {
         const next = {};
-        snap.docs.forEach(d => { const v = d.data(); if(v && v.slug) next[v.slug] = {grade: v.grade ?? null, seen: !!v.seen}; });
+        snap.docs.forEach(d => { const v = d.data(); if(v && v.slug) next[v.slug] = normalize(v); });
         grades = next;
         renderReel();
       }, err => console.warn('grades snapshot error', err));
     }
   }catch(e){ console.warn('db unavailable', e); }
 }
-boot();
-</script>
-"""
+boot();"""
+
+LOCAL_BACKEND_JS = r"""async function fetchGrades(){
+  const res = await fetch('/api/grades');
+  if(!res.ok) throw new Error('fetch /api/grades: ' + res.status);
+  const rows = await res.json();
+  const next = {};
+  rows.forEach(v => { if(v && v.slug) next[v.slug] = normalize(v); });
+  return next;
+}
+
+async function saveDoc(slug, body){
+  const res = await fetch('/api/grades/' + encodeURIComponent(slug), {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+  });
+  if(!res.ok) throw new Error('POST /api/grades: ' + res.status);
+}
+
+$('#hide-reviewed').addEventListener('change', renderReel);
+
+async function boot(){
+  renderStats();
+  renderPeople();
+  renderReel();
+  try{ grades = await fetchGrades(); renderReel(); }
+  catch(e){ console.warn('grades fetch failed', e); }
+  // Light polling, not a push subscription -- picks up a grade set from
+  // another tab or device (e.g. grading from your phone on the same wifi)
+  // within a few seconds.
+  setInterval(async () => {
+    try{ grades = await fetchGrades(); renderReel(); }
+    catch(e){ /* server probably just not running yet -- keep trying */ }
+  }, 4000);
+}
+boot();"""
 
 if __name__ == "__main__":
     main()
