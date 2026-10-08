@@ -585,23 +585,18 @@ function sessionAdvance(){
   renderSession();
 }
 
-function sessionMarkSeen(f){
-  if(cardState(f.slug).status !== 'seen') setStatus(f, 'seen');
-  session.stats.seen++;
+// Stage 1, "seen it?" -- a plain yes/no, same either way: set status, move
+// to stage 2. No verdict is recorded yet; that's stage 2's job.
+function sessionSetSeen(f, val){
+  if(cardState(f.slug).status !== val) setStatus(f, val);
+  session.stats[val]++;
   session.stage = 'rate';
   renderSession();
 }
 
-// Left arrow is a one-key shortcut for the single most common triage call:
-// haven't seen it, don't want to -- interest=1, the bottom of the same
-// want-to-see scale the number keys set. Settled in one keystroke, with no
-// follow-up rating step, so the hand never has to leave the home position.
-function sessionMarkDontCare(f){
-  update(f, {status:'unseen', rating:null, interest:1, never:false});
-  session.stats.unseen++;
-  sessionAdvance();
-}
-
+// Stage 2, unseen branch: "how inclined are you to watch?" 1-5 is interest;
+// left arrow (or X) is the zero case -- don't want to see it at all, full
+// exclude from the weighting, not a low number on the interest scale.
 function sessionRate(f, i){
   if(cardState(f.slug).status === 'seen') setRating(f, i); else setInterest(f, i);
   sessionAdvance();
@@ -620,11 +615,14 @@ function sessionKeydown(e){
   if(session.idx >= session.queue.length) return; // done screen: only Escape does anything
   const f = session.queue[session.idx];
   if(session.stage === 'seen'){
-    if(e.key === 'ArrowLeft'){ e.preventDefault(); sessionMarkDontCare(f); }
-    else if(e.key === 'ArrowRight'){ e.preventDefault(); sessionMarkSeen(f); }
+    if(e.key === 'ArrowLeft'){ e.preventDefault(); sessionSetSeen(f, 'unseen'); }
+    else if(e.key === 'ArrowRight'){ e.preventDefault(); sessionSetSeen(f, 'seen'); }
   } else if(session.stage === 'rate'){
     if(/^[1-5]$/.test(e.key)){ e.preventDefault(); sessionRate(f, parseInt(e.key, 10)); }
     else if(e.key.toLowerCase() === 'x'){ e.preventDefault(); sessionNever(f); }
+    else if(e.key === 'ArrowLeft' && cardState(f.slug).status === 'unseen'){
+      e.preventDefault(); sessionNever(f);
+    }
   }
 }
 
@@ -663,34 +661,34 @@ function renderSession(){
   if(session.stage === 'seen'){
     stage.appendChild(el('div','session-prompt','Seen it?'));
     const row = el('div','session-row');
-    const no = el('button','session-big no','← Don’t care to see it');
-    no.onclick = () => sessionMarkDontCare(f);
-    const yes = el('button','session-big yes','Yes, seen it →');
-    yes.onclick = () => sessionMarkSeen(f);
+    const no = el('button','session-big no','\u2190 No, haven\u2019t seen it');
+    no.onclick = () => sessionSetSeen(f, 'unseen');
+    const yes = el('button','session-big yes','Yes, seen it \u2192');
+    yes.onclick = () => sessionSetSeen(f, 'seen');
     row.appendChild(no); row.appendChild(yes);
     stage.appendChild(row);
-    stage.appendChild(el('div','session-hint','← don\u2019t care to see it (done) \u00b7 \u2192 seen it, rate next \u00b7 or click'));
+    stage.appendChild(el('div','session-hint','\u2190 / \u2192 keys, or click'));
   } else {
     const seen = cardState(f.slug).status === 'seen';
-    stage.appendChild(el('div','session-prompt', seen ? 'How much did you enjoy it?' : 'How much do you want to see it?'));
+    stage.appendChild(el('div','session-prompt', seen ? 'How much did you enjoy it?' : 'How inclined are you to watch?'));
     const row = el('div','session-row');
     const stars = el('div','session-stars ' + (seen ? 'rating' : 'interest'));
     const tips = seen ? RATING_TIPS : INTEREST_TIPS;
     for(let i=1;i<=5;i++){
-      const b = el('button','', seen ? '★' : '●');
+      const b = el('button','', seen ? '\u2605' : '\u25cf');
       b.title = tips[i];
       b.onclick = () => sessionRate(f, i);
       stars.appendChild(b);
     }
     row.appendChild(stars);
     if(!seen){
-      const nv = el('button','session-never','✕ Never');
-      nv.title = 'garbage / bad signal / would never watch';
+      const nv = el('button','session-never','\u2190 Not at all / Never');
+      nv.title = "don't want to see it at all -- excluded from weighting, not rated";
       nv.onclick = () => sessionNever(f);
       row.appendChild(nv);
     }
     stage.appendChild(row);
-    stage.appendChild(el('div','session-hint', seen ? 'press 1-5' : 'press 1-5, or X for never'));
+    stage.appendChild(el('div','session-hint', seen ? 'press 1-5, or X for hated it' : 'press 1-5, or \u2190 / X for not at all'));
   }
   card.appendChild(stage);
 }
