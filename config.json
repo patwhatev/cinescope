@@ -1,0 +1,33 @@
+{
+  "weights": {
+    "graph": 0.388,
+    "theme": 0.304,
+    "people": 0.193,
+    "quality": 0.115
+  },
+  "token_weights": {
+    "mini_theme": 1.0,
+    "theme": 0.8,
+    "genre": 0.35
+  },
+  "graph_decay": 0.42,
+  "seed_obscurity_bonus": 0.35,
+  "bayes_prior_count": 2000,
+  "bayes_prior_rating": 3.2,
+  "min_rating_count": 250,
+  "popularity_pivot": 20000,
+  "popularity_slope": 0.16,
+  "popularity_clamp": [
+    0.62,
+    1.25
+  ],
+  "person_boost": {
+    "philip-seymour-hoffman": 0.6,
+    "david-cronenberg": 0.6
+  },
+  "crawl": {
+    "depth2_metadata_budget": 220,
+    "person_count": 14,
+    "person_film_budget": 120
+  }
+}
