@@ -4,19 +4,7 @@
    "kind": "director",
    "slug": "david-cronenberg",
    "name": "David Cronenberg",
-   "score": 4.0
-  },
-  {
-   "kind": "director",
-   "slug": "larry-clark",
-   "name": "Larry Clark",
    "score": 3.0
-  },
-  {
-   "kind": "director",
-   "slug": "richard-brooks",
-   "name": "Richard Brooks",
-   "score": 2.0
   },
   {
    "kind": "director",
@@ -26,39 +14,33 @@
   },
   {
    "kind": "director",
-   "slug": "harmony-korine-1",
-   "name": "Harmony Korine",
-   "score": 2.0
-  },
-  {
-   "kind": "writer",
-   "slug": "harmony-korine-1",
-   "name": "Harmony Korine",
+   "slug": "takashi-miike",
+   "name": "Takashi Miike",
    "score": 2.0
   },
   {
    "kind": "director",
-   "slug": "yorgos-lanthimos",
-   "name": "Yorgos Lanthimos",
-   "score": 2.0
+   "slug": "larry-clark",
+   "name": "Larry Clark",
+   "score": 1.5
   },
   {
    "kind": "director",
    "slug": "david-lynch",
    "name": "David Lynch",
-   "score": 2.0
+   "score": 1.5
   },
   {
    "kind": "actor",
    "slug": "philip-seymour-hoffman",
    "name": "Philip Seymour Hoffman",
-   "score": 1.768
+   "score": 1.318
   },
   {
    "kind": "writer",
    "slug": "david-cronenberg",
    "name": "David Cronenberg",
-   "score": 1.7
+   "score": 1.2
   },
   {
    "kind": "director",
@@ -127,13 +109,7 @@
    "score": 1.0
   },
   {
-   "kind": "writer",
-   "slug": "david-mckenna",
-   "name": "David McKenna",
-   "score": 1.0
-  },
-  {
-   "kind": "writer",
+   "kind": "director",
    "slug": "richard-brooks",
    "name": "Richard Brooks",
    "score": 1.0
@@ -152,6 +128,18 @@
   },
   {
    "kind": "director",
+   "slug": "harmony-korine-1",
+   "name": "Harmony Korine",
+   "score": 1.0
+  },
+  {
+   "kind": "writer",
+   "slug": "harmony-korine-1",
+   "name": "Harmony Korine",
+   "score": 1.0
+  },
+  {
+   "kind": "director",
    "slug": "gerald-kargl",
    "name": "Gerald Kargl",
    "score": 1.0
@@ -164,165 +152,33 @@
   },
   {
    "kind": "director",
-   "slug": "david-jacobson",
-   "name": "David Jacobson",
+   "slug": "tobe-hooper",
+   "name": "Tobe Hooper",
    "score": 1.0
   },
   {
    "kind": "director",
-   "slug": "michael-cuesta",
-   "name": "Michael Cuesta",
+   "slug": "ingmar-bergman",
+   "name": "Ingmar Bergman",
    "score": 1.0
   },
   {
    "kind": "director",
-   "slug": "lars-von-trier",
-   "name": "Lars von Trier",
-   "score": 1.0
-  },
-  {
-   "kind": "director",
-   "slug": "franck-khalfoun",
-   "name": "Franck Khalfoun",
-   "score": 1.0
-  },
-  {
-   "kind": "writer",
-   "slug": "gregory-levasseur",
-   "name": "Grégory Levasseur",
-   "score": 1.0
-  },
-  {
-   "kind": "writer",
-   "slug": "alexandre-aja",
-   "name": "Alexandre Aja",
-   "score": 1.0
-  },
-  {
-   "kind": "writer",
    "slug": "yorgos-lanthimos",
    "name": "Yorgos Lanthimos",
    "score": 1.0
   },
   {
    "kind": "writer",
-   "slug": "efthimis-filippou",
-   "name": "Efthimis Filippou",
-   "score": 1.0
+   "slug": "david-mckenna",
+   "name": "David McKenna",
+   "score": 0.75
   },
   {
    "kind": "writer",
    "slug": "david-lynch",
    "name": "David Lynch",
-   "score": 1.0
-  },
-  {
-   "kind": "director",
-   "slug": "shinya-tsukamoto-2",
-   "name": "Shinya Tsukamoto",
-   "score": 1.0
-  },
-  {
-   "kind": "director",
-   "slug": "cameron-crowe",
-   "name": "Cameron Crowe",
-   "score": 1.0
-  },
-  {
-   "kind": "director",
-   "slug": "bernardo-bertolucci",
-   "name": "Bernardo Bertolucci",
-   "score": 1.0
-  },
-  {
-   "kind": "director",
-   "slug": "bennett-miller",
-   "name": "Bennett Miller",
-   "score": 1.0
-  },
-  {
-   "kind": "director",
-   "slug": "richard-kelly",
-   "name": "Richard Kelly",
-   "score": 1.0
-  },
-  {
-   "kind": "director",
-   "slug": "william-lustig",
-   "name": "William Lustig",
-   "score": 1.0
-  },
-  {
-   "kind": "director",
-   "slug": "takashi-miike",
-   "name": "Takashi Miike",
-   "score": 1.0
-  },
-  {
-   "kind": "director",
-   "slug": "john-schlesinger",
-   "name": "John Schlesinger",
-   "score": 1.0
-  },
-  {
-   "kind": "director",
-   "slug": "tim-hunter",
-   "name": "Tim Hunter",
-   "score": 1.0
-  },
-  {
-   "kind": "director",
-   "slug": "weronika-tofilska",
-   "name": "Weronika Tofilska",
-   "score": 1.0
-  },
-  {
-   "kind": "director",
-   "slug": "josephine-bornebusch",
-   "name": "Josephine Bornebusch",
-   "score": 1.0
-  },
-  {
-   "kind": "director",
-   "slug": "ari-aster",
-   "name": "Ari Aster",
-   "score": 1.0
-  },
-  {
-   "kind": "director",
-   "slug": "rob-zombie",
-   "name": "Rob Zombie",
-   "score": 1.0
-  },
-  {
-   "kind": "director",
-   "slug": "john-cassavetes",
-   "name": "John Cassavetes",
-   "score": 1.0
-  },
-  {
-   "kind": "director",
-   "slug": "alexandre-aja",
-   "name": "Alexandre Aja",
-   "score": 1.0
-  },
-  {
-   "kind": "actor",
-   "slug": "tom-cruise",
-   "name": "Tom Cruise",
-   "score": 0.9
-  },
-  {
-   "kind": "actor",
-   "slug": "jeremy-irons",
-   "name": "Jeremy Irons",
-   "score": 0.833
-  },
-  {
-   "kind": "actor",
-   "slug": "nicole-kidman",
-   "name": "Nicole Kidman",
-   "score": 0.765
+   "score": 0.75
   },
   {
    "kind": "director",
@@ -332,32 +188,176 @@
   },
   {
    "kind": "actor",
-   "slug": "justin-theroux",
-   "name": "Justin Theroux",
-   "score": 0.65
+   "slug": "nicolas-cage",
+   "name": "Nicolas Cage",
+   "score": 0.675
   },
   {
    "kind": "actor",
-   "slug": "chloe-sevigny",
-   "name": "Chloë Sevigny",
-   "score": 0.601
-  },
-  {
-   "kind": "actor",
-   "slug": "leo-fitzpatrick",
-   "name": "Leo Fitzpatrick",
-   "score": 0.594
-  },
-  {
-   "kind": "actor",
-   "slug": "scott-wilson-1",
-   "name": "Scott Wilson",
-   "score": 0.505
+   "slug": "nicole-kidman",
+   "name": "Nicole Kidman",
+   "score": 0.574
   },
   {
    "kind": "writer",
    "slug": "patty-jenkins",
    "name": "Patty Jenkins",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "sophie-fillieres",
+   "name": "Sophie Fillières",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "philippe-grandrieux",
+   "name": "Philippe Grandrieux",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "pierre-hodgson",
+   "name": "Pierre Hodgson",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "mike-figgis",
+   "name": "Mike Figgis",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "wallace-shawn",
+   "name": "Wallace Shawn",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "andre-gregory",
+   "name": "Andre Gregory",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "richard-linklater",
+   "name": "Richard Linklater",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "ethan-coen",
+   "name": "Ethan Coen",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "joel-coen",
+   "name": "Joel Coen",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "pier-paolo-pasolini",
+   "name": "Pier Paolo Pasolini",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "richard-fire",
+   "name": "Richard Fire",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "john-mcnaughton",
+   "name": "John McNaughton",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "gordy-hoffman",
+   "name": "Gordy Hoffman",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "richard-brooks",
+   "name": "Richard Brooks",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "lawrence-d-cohen",
+   "name": "Lawrence D. Cohen",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "diane-johnson",
+   "name": "Diane Johnson",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "gerald-kargl",
+   "name": "Gerald Kargl",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "zbigniew-rybczynski",
+   "name": "Zbigniew Rybczyński",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "barry-gifford",
+   "name": "Barry Gifford",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "kim-henkel",
+   "name": "Kim Henkel",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "tobe-hooper",
+   "name": "Tobe Hooper",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "ingmar-bergman",
+   "name": "Ingmar Bergman",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "daisuke-tengan",
+   "name": "Daisuke Tengan",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "sakichi-sato",
+   "name": "Sakichi Sato",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "frederic-raphael",
+   "name": "Frederic Raphael",
+   "score": 0.5
+  },
+  {
+   "kind": "writer",
+   "slug": "yorgos-lanthimos",
+   "name": "Yorgos Lanthimos",
    "score": 0.5
   }
  ]

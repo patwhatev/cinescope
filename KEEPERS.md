@@ -82,3 +82,17 @@ What Dreams May Come
 - **Found-footage / mockumentary style** (The Poughkeepsie Tapes): confirmed
   not a format-level aversion — just a weak film. No new signal added; the
   existing quality channel already penalizes thinly-reviewed titles like it.
+
+## Iteration 02 — 2026-10-08, 9 newly kept
+
+| Film | Year | Weight | Score | |
+|---|---|---|---|---|
+| Lost Highway | 1997 | heavy (1.0) | 79.2 | <!--slug:lost-highway--> |
+| The Texas Chain Saw Massacre | 1974 | heavy (1.0) | 61.06 | <!--slug:the-texas-chain-saw-massacre--> |
+| Scenes from a Marriage | 1974 | heavy (1.0) | 51.88 | <!--slug:scenes-from-a-marriage--> |
+| Audition | 1999 | heavy (1.0) | 50.66 | <!--slug:audition--> |
+| Ichi the Killer | 2001 | heavy (1.0) | 46.48 | <!--slug:ichi-the-killer--> |
+| Alps | 2011 | light (0.5) | 50.61 | <!--slug:alps--> |
+| Wild at Heart | 1990 | light (0.5) | 49.06 | <!--slug:wild-at-heart--> |
+| Saw | 2004 | light (0.5) | 47.13 | <!--slug:saw--> |
+| The House That Jack Built | 2018 | light (0.5) | 46.66 | <!--slug:the-house-that-jack-built-2018--> |

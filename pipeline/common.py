@@ -149,3 +149,16 @@ def triage_slugs(reel_slugs):
             with open(dump, encoding="utf-8") as fh:
                 slugs |= {r["slug"] for r in json.load(fh)}
     return sorted(slugs - set(reel_slugs))
+
+
+def next_iteration():
+    """Smallest unused "NN" for out/iteration-NN.md, zero-padded, starting
+    at 01. Used by the UI's re-weigh button so it doesn't need a human to
+    pick a label each round."""
+    best = 0
+    if os.path.isdir(OUT):
+        for name in os.listdir(OUT):
+            m = re.match(r"iteration-(\d+)\.md$", name)
+            if m:
+                best = max(best, int(m.group(1)))
+    return "%02d" % (best + 1)

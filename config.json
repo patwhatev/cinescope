@@ -1,9 +1,9 @@
 {
   "weights": {
-    "graph": 0.388,
-    "theme": 0.304,
-    "people": 0.193,
-    "quality": 0.115
+    "graph": 0.355,
+    "theme": 0.314,
+    "people": 0.206,
+    "quality": 0.124
   },
   "token_weights": {
     "mini_theme": 1.0,

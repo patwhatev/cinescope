@@ -17,7 +17,9 @@ import json
 import mimetypes
 import os
 import sqlite3
+import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -50,6 +52,88 @@ def db():
             conn.execute("ALTER TABLE grades ADD COLUMN %s %s" % (col, sqltype))
         conn.commit()
     return conn
+
+
+PIPELINE_DIR = os.path.dirname(os.path.abspath(__file__))
+PYTHON = sys.executable
+
+# label, script, extra env, soft (a nonzero exit is logged and skipped
+# rather than aborting the rest -- grading feedback steps are refinements,
+# not required to produce a new pool).
+def _pipeline_steps():
+    iter_n = common.next_iteration()
+    return [
+        ("pull grades",    "pull_grades.py",   {},                                     True),
+        ("tune weights",   "tune.py",          {},                                      True),
+        ("tune (apply)",   "tune.py",          {},                                      True, ["--apply"]),
+        ("promote seeds",  "promote_seeds.py", {},                                      True),
+        ("update keepers", "update_keepers.py",{},                                      True),
+        ("crawl",          "crawl.py",         {},                                     False),
+        ("score",          "score.py",         {},                                     False),
+        ("report",         "report.py",        {"ITER": iter_n, "TOP": "40"},           True),
+        ("fetch posters",  "fetch_posters.py", {"BUILD_TOP": "80"},                     True),
+        ("build ui",       "build_ui.py",      {"ITER": iter_n, "MODE": "local", "BUILD_TOP": "80"}, False),
+    ]
+
+
+pipeline_lock = threading.Lock()
+pipeline_state = {"running": False, "log": [], "error": None, "step": None,
+                   "started_at": None, "done_at": None}
+
+
+def _log(line):
+    with pipeline_lock:
+        pipeline_state["log"].append(line)
+        pipeline_state["log"] = pipeline_state["log"][-500:]  # bounded, this is a status feed not an archive
+
+
+def _run_step(label, script, env_extra, args=None):
+    _log("== %s ==" % label)
+    with pipeline_lock:
+        pipeline_state["step"] = label
+    env = dict(os.environ)
+    env.update(env_extra)
+    cmd = [PYTHON, os.path.join(PIPELINE_DIR, script)] + (args or [])
+    proc = subprocess.Popen(cmd, cwd=PIPELINE_DIR, env=env, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, bufsize=1)
+    for line in proc.stdout:
+        _log(line.rstrip())
+    proc.wait()
+    return proc.returncode
+
+
+def _run_pipeline():
+    try:
+        for step in _pipeline_steps():
+            label, script, env_extra, soft = step[0], step[1], step[2], step[3]
+            args = step[4] if len(step) > 4 else None
+            rc = _run_step(label, script, env_extra, args)
+            if rc != 0:
+                _log("-- %s exited %d%s --" % (label, rc, " (continuing, non-essential)" if soft else ""))
+                if not soft:
+                    with pipeline_lock:
+                        pipeline_state["error"] = "%s failed (exit %d) -- see log above" % (label, rc)
+                    return
+        _log("== done ==")
+    except Exception as e:
+        _log("!! crashed: %s" % e)
+        with pipeline_lock:
+            pipeline_state["error"] = str(e)
+    finally:
+        with pipeline_lock:
+            pipeline_state["running"] = False
+            pipeline_state["step"] = None
+            pipeline_state["done_at"] = time.time()
+
+
+def start_pipeline():
+    with pipeline_lock:
+        if pipeline_state["running"]:
+            return False
+        pipeline_state.update(running=True, log=[], error=None, step=None,
+                              started_at=time.time(), done_at=None)
+    threading.Thread(target=_run_pipeline, daemon=True).start()
+    return True
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -101,6 +185,14 @@ class Handler(BaseHTTPRequestHandler):
                 for s, t, g, st, ra, it, nv, ts in rows
             ])
 
+        if parts == ["api", "reweigh"]:
+            with pipeline_lock:
+                return self._json(200, {
+                    "running": pipeline_state["running"], "step": pipeline_state["step"],
+                    "error": pipeline_state["error"], "log": pipeline_state["log"][-120:],
+                    "started_at": pipeline_state["started_at"], "done_at": pipeline_state["done_at"],
+                })
+
         self.send_error(404, "not found")
 
     def do_POST(self):
@@ -133,6 +225,13 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             conn.close()
             return self._json(200, {"ok": True, **{c: row[c] for c in COLUMNS}})
+
+        if parts == ["api", "reweigh"]:
+            started = start_pipeline()
+            if not started:
+                return self._json(409, {"error": "already running"})
+            return self._json(200, {"ok": True, "started": True})
+
         self.send_error(404, "not found")
 
 

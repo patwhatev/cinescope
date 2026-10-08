@@ -282,19 +282,27 @@ details.method[open] summary::before{transform:rotate(90deg)}
 .btn[disabled]{opacity:.5; cursor:wait}
 .gen-tags{font-size:11.5px; color:var(--text-faint); margin-left:2px}
 .btn.review{background:var(--accent-soft); border-color:var(--accent); color:var(--accent-strong)}
+.btn.reweigh{background:var(--teal-soft); border-color:var(--teal); color:var(--teal)}
+.btn.reweigh[disabled]{opacity:.6; cursor:wait}
+.tally .t-link{font:inherit; background:none; border:none; padding:0; cursor:pointer}
+.tally .t-link:hover{text-decoration:underline; color:var(--text)}
+.tally .t-link b{font-size:16px; color:var(--text); font-family:"IBM Plex Mono",monospace}
+
+/* ---- shared modal shell (review session, watchlist, re-weigh) ---- */
+.modal-overlay{position:fixed; inset:0; background:rgba(10,10,10,.6); z-index:50;
+  display:none; align-items:center; justify-content:center; padding:20px}
+.modal-overlay.open{display:flex}
+.modal-card{background:var(--surface); border:1px solid var(--border); border-radius:16px;
+  box-shadow:0 20px 60px -10px rgba(0,0,0,.4); width:100%; max-height:92vh;
+  overflow-y:auto; padding:20px 24px 24px}
+.modal-top{display:flex; justify-content:space-between; align-items:center; margin-bottom:14px}
+.modal-exit{background:none; border:none; color:var(--text-faint); font-size:13px; cursor:pointer;
+  padding:4px 8px}
+.modal-exit:hover{color:var(--text)}
 
 /* ---- review session ---- */
-.session-overlay{position:fixed; inset:0; background:rgba(10,10,10,.6); z-index:50;
-  display:none; align-items:center; justify-content:center; padding:20px}
-.session-overlay.open{display:flex}
-.session-card{background:var(--surface); border:1px solid var(--border); border-radius:16px;
-  box-shadow:0 20px 60px -10px rgba(0,0,0,.4); width:100%; max-width:560px; max-height:92vh;
-  overflow-y:auto; padding:20px 24px 24px}
-.session-top{display:flex; justify-content:space-between; align-items:center; margin-bottom:14px}
+.session-card{max-width:560px}
 .session-progress{font-family:"IBM Plex Mono",monospace; font-size:12.5px; color:var(--text-faint)}
-.session-exit{background:none; border:none; color:var(--text-faint); font-size:13px; cursor:pointer;
-  padding:4px 8px}
-.session-exit:hover{color:var(--text)}
 .session-body{display:flex; gap:18px; margin-bottom:18px}
 .session-poster{flex:none; width:140px; height:210px; border-radius:10px; overflow:hidden;
   background:var(--surface-2); box-shadow:var(--shadow)}
@@ -335,6 +343,39 @@ details.method[open] summary::before{transform:rotate(90deg)}
   .session-poster{width:100%; height:200px}
   .session-stars button{width:38px; height:38px; font-size:17px}
 }
+
+/* ---- watchlist ---- */
+.watchlist-card{max-width:620px}
+.wl-empty{color:var(--text-dim); font-size:14px; padding:20px 4px}
+.wl-row{display:flex; gap:12px; align-items:center; padding:10px 0;
+  border-bottom:1px solid var(--border)}
+.wl-row:last-child{border-bottom:none}
+.wl-poster{flex:none; width:44px; height:66px; border-radius:5px; overflow:hidden;
+  background:var(--surface-2)}
+.wl-poster img{width:100%; height:100%; object-fit:cover; display:block}
+.wl-poster .ph{width:100%; height:100%; display:flex; align-items:center; justify-content:center;
+  font-family:"Fraunces",Georgia,serif; font-size:18px; color:var(--text-faint)}
+.wl-info{flex:1; min-width:0}
+.wl-info .title{font-family:"Fraunces",Georgia,serif; font-size:15.5px; font-weight:600}
+.wl-info .year{color:var(--text-faint); font-size:12.5px; margin-left:4px}
+.wl-info .meta{color:var(--text-dim); font-size:12px; margin-top:2px}
+.wl-dots{flex:none; display:flex; gap:2px; font-size:13px}
+.wl-dots span{color:var(--border)}
+.wl-dots span.lit{color:var(--accent)}
+
+/* ---- re-weigh ---- */
+.reweigh-card{max-width:640px}
+.reweigh-intro{color:var(--text-dim); font-size:13.5px; line-height:1.55; margin-bottom:14px}
+.reweigh-status{display:flex; align-items:center; gap:10px; margin-bottom:10px; font-size:13px}
+.reweigh-spinner{width:14px; height:14px; border-radius:50%; border:2px solid var(--border);
+  border-top-color:var(--teal); animation:rw-spin .8s linear infinite}
+@keyframes rw-spin{to{transform:rotate(360deg)}}
+.reweigh-step{font-weight:600; color:var(--teal)}
+.reweigh-log{background:var(--surface-2); border:1px solid var(--border); border-radius:8px;
+  padding:10px 12px; font-family:"IBM Plex Mono",monospace; font-size:11.5px; line-height:1.6;
+  color:var(--text-dim); max-height:320px; overflow-y:auto; white-space:pre-wrap}
+.reweigh-error{color:var(--minus); font-size:13px; margin-top:10px; font-weight:600}
+.reweigh-done{color:var(--plus); font-size:13px; margin-top:10px; font-weight:600}
 
 footer{margin-top:40px; padding-top:18px; border-top:1px solid var(--border);
   color:var(--text-faint); font-size:12px; line-height:1.6}
@@ -400,12 +441,13 @@ footer{margin-top:40px; padding-top:18px; border-top:1px solid var(--border);
 
   <div class="tally">
     <div class="t-item">seen &amp; rated <b id="t-rated">0</b></div>
-    <div class="t-item">watchlist <b id="t-watch">0</b></div>
+    <button class="t-item t-link" id="btn-watchlist">watchlist <b id="t-watch">0</b></button>
     <div class="t-item">never <b id="t-never">0</b></div>
     <div class="t-item">to re-triage <b id="t-legacy">0</b></div>
     <div class="t-item">reviewed <b id="t-graded">0</b> / <span id="t-total" class="mono">0</span></div>
     <div class="spacer"></div>
     <button class="btn review" id="btn-review-session">&#9654; Run Review Session</button>
+    <button class="btn reweigh" id="btn-reweigh">&#8635; Re-weigh &amp; Generate New Pool</button>
     <label><input type="checkbox" id="hide-reviewed"> hide reviewed</label>
   </div>
 
@@ -413,7 +455,9 @@ footer{margin-top:40px; padding-top:18px; border-top:1px solid var(--border);
 
   <div class="reel" id="reel"></div>
 
-  <div class="session-overlay" id="session-overlay"><div class="session-card" id="session-card"></div></div>
+  <div class="modal-overlay" id="session-overlay"><div class="modal-card session-card" id="session-card"></div></div>
+  <div class="modal-overlay" id="watchlist-overlay"><div class="modal-card watchlist-card" id="watchlist-card"></div></div>
+  <div class="modal-overlay" id="reweigh-overlay"><div class="modal-card reweigh-card" id="reweigh-card"></div></div>
 
   <footer>
     Calls save to this page's own store &mdash; they sync back across sessions and
@@ -743,9 +787,9 @@ function renderSession(){
   const card = $('#session-card');
   card.innerHTML = '';
 
-  const top = el('div','session-top');
+  const top = el('div','modal-top');
   top.appendChild(el('span','session-progress', `Reviewing ${session.idx+1} of ${session.queue.length}`));
-  const exit = el('button','session-exit','✕ Exit (Esc)');
+  const exit = el('button','modal-exit','✕ Exit (Esc)');
   exit.onclick = closeSession;
   top.appendChild(exit);
   card.appendChild(top);
@@ -819,6 +863,147 @@ function renderSessionDone(){
   card.appendChild(done);
 }
 
+// ---- watchlist: unseen films flagged interest>=3, sorted by how much you
+// want to see them. Pure client-side read of the same grades/DATA.films
+// state the list view already has -- no extra round trip. ------------------
+function watchlistItems(){
+  const items = [];
+  for(const f of DATA.films){
+    const st = cardState(f.slug);
+    if(st.status === 'unseen' && st.interest >= 3) items.push({f, interest: st.interest});
+  }
+  items.sort((a,b) => (b.interest - a.interest) || ((b.f.score||0) - (a.f.score||0)));
+  return items;
+}
+
+function openWatchlist(){
+  renderWatchlist();
+  $('#watchlist-overlay').classList.add('open');
+  document.addEventListener('keydown', watchlistKeydown);
+}
+function closeWatchlist(){
+  $('#watchlist-overlay').classList.remove('open');
+  document.removeEventListener('keydown', watchlistKeydown);
+}
+function watchlistKeydown(e){ if(e.key === 'Escape'){ e.preventDefault(); closeWatchlist(); } }
+
+function renderWatchlist(){
+  const card = $('#watchlist-card');
+  card.innerHTML = '';
+  const top = el('div','modal-top');
+  top.appendChild(el('span','session-progress','Watchlist \u2014 by how much you want to see it'));
+  const exit = el('button','modal-exit','\u2715 Close (Esc)');
+  exit.onclick = closeWatchlist;
+  top.appendChild(exit);
+  card.appendChild(top);
+
+  const items = watchlistItems();
+  if(!items.length){
+    card.appendChild(el('div','wl-empty',
+      'Nothing here yet \u2014 in the list or the review session, rate an unseen film 3\u20135 on '+
+      '\u201chow inclined are you to watch?\u201d and it lands here.'));
+    return;
+  }
+  for(const {f, interest} of items){
+    const row = el('div','wl-row');
+    const poster = el('div','wl-poster');
+    if(f.poster){ const img = el('img','',''); img.src = f.poster; img.alt = f.title; poster.appendChild(img); }
+    else poster.appendChild(el('div','ph', f.title.charAt(0)));
+    row.appendChild(poster);
+    const info = el('div','wl-info');
+    info.innerHTML = `<span class="title">${f.title}</span><span class="year">${f.year}</span>`;
+    info.appendChild(el('div','meta', `dir. ${f.dirs.join(', ')||'&mdash;'} &middot; ${f.genres.join(', ')||'&mdash;'}`));
+    row.appendChild(info);
+    const dots = el('div','wl-dots');
+    for(let i=1;i<=5;i++) dots.appendChild(el('span','', i<=interest ? '\u25cf' : '\u25cb'));
+    row.appendChild(dots);
+    card.appendChild(row);
+  }
+}
+
+// ---- re-weigh: triggers the full pipeline (pull grades -> tune -> promote
+// seeds -> re-crawl -> score -> build) as a background job on the server,
+// polls for progress, reloads onto the new pool when it finishes. Local
+// mode only -- wired in LOCAL_BACKEND_JS, hidden in artifact mode (no
+// server to run a subprocess pipeline on claude.ai). ------------------------
+let reweighTimer = null;
+
+function openReweigh(){
+  if(!confirm('This re-crawls letterboxd from your updated grading and can take '+
+              'several minutes. Start it now?')) return;
+  renderReweighShell();
+  $('#reweigh-overlay').classList.add('open');
+  $('#btn-reweigh').disabled = true;
+  fetch('/api/reweigh', {method:'POST'}).then(r => r.json()).then(d => {
+    if(d.error && d.error !== 'already running'){ reweighShowFatal(d.error); return; }
+    pollReweigh();
+    reweighTimer = setInterval(pollReweigh, 1500);
+  }).catch(e => reweighShowFatal(String(e)));
+}
+
+function closeReweigh(){
+  $('#reweigh-overlay').classList.remove('open');
+  // Closing the modal only stops this tab's polling -- the job is a
+  // server-side background thread and keeps running either way.
+  if(reweighTimer){ clearInterval(reweighTimer); reweighTimer = null; }
+}
+
+function reweighShowFatal(msg){
+  $('#btn-reweigh').disabled = false;
+  $('#reweigh-card').appendChild(el('div','reweigh-error', '\u26a0 could not start: ' + msg));
+}
+
+function renderReweighShell(){
+  const card = $('#reweigh-card');
+  card.innerHTML = '';
+  const top = el('div','modal-top');
+  top.appendChild(el('span','session-progress','Re-weighing & generating new pool'));
+  const exit = el('button','modal-exit','\u2715 Close');
+  exit.onclick = closeReweigh;
+  top.appendChild(exit);
+  card.appendChild(top);
+  card.appendChild(el('div','reweigh-intro',
+    'Pulls your grading into the model, retunes the four channel weights, folds confirmed '+
+    'keepers into the seed set, re-crawls letterboxd and rescores everything. Several minutes, '+
+    'typically. Closing this window does not stop it \u2014 keep grading, check back any time.'));
+  const status = el('div','reweigh-status');
+  status.appendChild(el('div','reweigh-spinner'));
+  status.appendChild(el('span','','starting\u2026'));
+  card.appendChild(status);
+  card.appendChild(el('div','reweigh-log',''));
+}
+
+function pollReweigh(){
+  fetch('/api/reweigh').then(r => r.json()).then(d => {
+    const card = $('#reweigh-card');
+    if(!card) return;
+    let status = card.querySelector('.reweigh-status');
+    const log = card.querySelector('.reweigh-log');
+    if(!status){ renderReweighShell(); status = card.querySelector('.reweigh-status'); }
+    status.innerHTML = '';
+    if(d.running){
+      status.appendChild(el('div','reweigh-spinner'));
+      status.appendChild(el('span','','running: '));
+      status.appendChild(el('span','reweigh-step', d.step || '\u2026'));
+    } else {
+      status.appendChild(el('span','', d.error ? 'stopped' : 'finished'));
+    }
+    if(log){ log.textContent = (d.log||[]).join('\n'); log.scrollTop = log.scrollHeight; }
+
+    if(!d.running){
+      if(reweighTimer){ clearInterval(reweighTimer); reweighTimer = null; }
+      $('#btn-reweigh').disabled = false;
+      if(!card.querySelector('.reweigh-error, .reweigh-done')){
+        if(d.error) card.appendChild(el('div','reweigh-error', '\u26a0 ' + d.error));
+        else {
+          card.appendChild(el('div','reweigh-done','Done \u2014 reloading onto the new pool\u2026'));
+          setTimeout(() => location.reload(), 1200);
+        }
+      }
+    }
+  }).catch(() => {});
+}
+
 __BACKEND_JS__
 </script>
 """
@@ -832,6 +1017,8 @@ async function saveDoc(slug, body){
 
 $('#hide-reviewed').addEventListener('change', renderReel);
 $('#btn-review-session').addEventListener('click', openSession);
+$('#btn-watchlist').addEventListener('click', openWatchlist);
+$('#btn-reweigh').style.display = 'none'; // no server to run a pipeline on claude.ai
 
 async function boot(){
   renderStats();
@@ -869,6 +1056,8 @@ async function saveDoc(slug, body){
 
 $('#hide-reviewed').addEventListener('change', renderReel);
 $('#btn-review-session').addEventListener('click', openSession);
+$('#btn-watchlist').addEventListener('click', openWatchlist);
+$('#btn-reweigh').addEventListener('click', openReweigh);
 
 async function boot(){
   renderStats();
@@ -883,6 +1072,18 @@ async function boot(){
     try{ grades = await fetchGrades(); renderReel(); }
     catch(e){ /* server probably just not running yet -- keep trying */ }
   }, 4000);
+  // A re-weigh started before a reload (or from another tab) keeps running
+  // server-side -- resume watching it instead of leaving the button idle.
+  try{
+    const d = await (await fetch('/api/reweigh')).json();
+    if(d.running){
+      renderReweighShell();
+      $('#reweigh-overlay').classList.add('open');
+      $('#btn-reweigh').disabled = true;
+      pollReweigh();
+      reweighTimer = setInterval(pollReweigh, 1500);
+    }
+  }catch(e){ /* fine, just means nothing to resume */ }
 }
 boot();"""
 
