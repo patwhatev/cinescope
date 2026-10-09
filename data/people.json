@@ -4,43 +4,37 @@
    "kind": "director",
    "slug": "david-cronenberg",
    "name": "David Cronenberg",
-   "score": 3.0
+   "score": 1.568
   },
   {
    "kind": "director",
    "slug": "stanley-kubrick",
    "name": "Stanley Kubrick",
-   "score": 2.0
+   "score": 1.345
   },
   {
    "kind": "director",
    "slug": "takashi-miike",
    "name": "Takashi Miike",
-   "score": 2.0
+   "score": 1.3
   },
   {
    "kind": "director",
    "slug": "larry-clark",
    "name": "Larry Clark",
-   "score": 1.5
+   "score": 1.15
   },
   {
    "kind": "director",
    "slug": "david-lynch",
    "name": "David Lynch",
-   "score": 1.5
+   "score": 1.15
   },
   {
    "kind": "actor",
    "slug": "philip-seymour-hoffman",
    "name": "Philip Seymour Hoffman",
-   "score": 1.318
-  },
-  {
-   "kind": "writer",
-   "slug": "david-cronenberg",
-   "name": "David Cronenberg",
-   "score": 1.2
+   "score": 1.13
   },
   {
    "kind": "director",
@@ -121,19 +115,7 @@
    "score": 1.0
   },
   {
-   "kind": "writer",
-   "slug": "stanley-kubrick",
-   "name": "Stanley Kubrick",
-   "score": 1.0
-  },
-  {
    "kind": "director",
-   "slug": "harmony-korine-1",
-   "name": "Harmony Korine",
-   "score": 1.0
-  },
-  {
-   "kind": "writer",
    "slug": "harmony-korine-1",
    "name": "Harmony Korine",
    "score": 1.0
@@ -164,39 +146,45 @@
   },
   {
    "kind": "director",
-   "slug": "yorgos-lanthimos",
-   "name": "Yorgos Lanthimos",
-   "score": 1.0
-  },
-  {
-   "kind": "writer",
-   "slug": "david-mckenna",
-   "name": "David McKenna",
-   "score": 0.75
-  },
-  {
-   "kind": "writer",
-   "slug": "david-lynch",
-   "name": "David Lynch",
-   "score": 0.75
-  },
-  {
-   "kind": "director",
    "slug": "todd-solondz",
    "name": "Todd Solondz",
    "score": 0.7
   },
   {
-   "kind": "actor",
-   "slug": "nicolas-cage",
-   "name": "Nicolas Cage",
-   "score": 0.675
+   "kind": "writer",
+   "slug": "stanley-kubrick",
+   "name": "Stanley Kubrick",
+   "score": 0.672
+  },
+  {
+   "kind": "writer",
+   "slug": "harmony-korine-1",
+   "name": "Harmony Korine",
+   "score": 0.65
+  },
+  {
+   "kind": "director",
+   "slug": "yorgos-lanthimos",
+   "name": "Yorgos Lanthimos",
+   "score": 0.65
+  },
+  {
+   "kind": "writer",
+   "slug": "david-mckenna",
+   "name": "David McKenna",
+   "score": 0.575
+  },
+  {
+   "kind": "writer",
+   "slug": "david-lynch",
+   "name": "David Lynch",
+   "score": 0.575
   },
   {
    "kind": "actor",
-   "slug": "nicole-kidman",
-   "name": "Nicole Kidman",
-   "score": 0.574
+   "slug": "nicolas-cage",
+   "name": "Nicolas Cage",
+   "score": 0.518
   },
   {
    "kind": "writer",
@@ -355,9 +343,21 @@
    "score": 0.5
   },
   {
-   "kind": "writer",
-   "slug": "yorgos-lanthimos",
-   "name": "Yorgos Lanthimos",
+   "kind": "director",
+   "slug": "john-carpenter",
+   "name": "John Carpenter",
+   "score": 0.5
+  },
+  {
+   "kind": "director",
+   "slug": "mary-harron",
+   "name": "Mary Harron",
+   "score": 0.5
+  },
+  {
+   "kind": "director",
+   "slug": "michael-haneke",
+   "name": "Michael Haneke",
    "score": 0.5
   }
  ]

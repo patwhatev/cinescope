@@ -1,9 +1,9 @@
 {
   "weights": {
-    "graph": 0.355,
-    "theme": 0.314,
-    "people": 0.206,
-    "quality": 0.124
+    "graph": 0.31,
+    "theme": 0.306,
+    "people": 0.248,
+    "quality": 0.136
   },
   "token_weights": {
     "mini_theme": 1.0,
@@ -14,7 +14,7 @@
   "seed_obscurity_bonus": 0.35,
   "bayes_prior_count": 2000,
   "bayes_prior_rating": 3.2,
-  "min_rating_count": 250,
+  "min_rating_count": 600,
   "popularity_pivot": 20000,
   "popularity_slope": 0.16,
   "popularity_clamp": [
@@ -28,6 +28,11 @@
   "crawl": {
     "depth2_metadata_budget": 220,
     "person_count": 14,
-    "person_film_budget": 120
-  }
+    "person_film_budget": 120,
+    "person_cap_per_crawl": 10,
+    "opportunity_count": 4,
+    "opportunity_min_score": 55
+  },
+  "person_repeat_decay": 0.3,
+  "reel_director_cap": 3
 }

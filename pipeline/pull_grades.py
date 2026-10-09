@@ -64,18 +64,30 @@ def main():
     for slug, r in dump.items():
         rank, f = byslug.get(slug, (0, None))
         rec = recs.get(slug, {})
-        c = f["channels"] if f else {"g": "", "t": "", "p": "", "q": ""}
+        old_row = existing.get(slug, {})
+        # A promoted seed drops out of scores.json entirely (seeds aren't
+        # scored against themselves) -- without this fallback, every run
+        # after a film graduates to seeds.txt silently blanks the channel
+        # snapshot that tune.py needs to grade it, which was quietly
+        # erasing the hit-rate signal for your best-rated films.
+        if f:
+            row_rank, row_score, c = rank, f["score"], f["channels"]
+        else:
+            row_rank = old_row.get("rank") or rank
+            row_score = old_row.get("score") or ""
+            c = {k: old_row.get(k, "") for k in ("g", "t", "p", "q")}
         status = r.get("status")
         merged[slug] = {
-            "rank": rank, "slug": slug,
-            "title": (f or rec).get("title") or slug, "year": (f or rec).get("year") or "",
-            "score": f["score"] if f else "",
+            "rank": row_rank, "slug": slug,
+            "title": (f or rec).get("title") or old_row.get("title") or slug,
+            "year": (f or rec).get("year") or old_row.get("year") or "",
+            "score": row_score,
             "g": c["g"], "t": c["t"], "p": c["p"], "q": c["q"],
             "grade": cell(r.get("grade")),
             "seen": {"seen": "y", "unseen": "n"}.get(status, ""),
             "rating": cell(r.get("rating")), "interest": cell(r.get("interest")),
             "never": "y" if r.get("never") else "",
-            "note": existing.get(slug, {}).get("note", ""),
+            "note": old_row.get("note", ""),
         }
 
     def rank_key(s):

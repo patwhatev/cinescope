@@ -94,17 +94,25 @@ def main():
             for m in films.get(n, {}).get("similar", []):
                 reach[m][s] = max(reach[m].get(s, 0), eff[s] * decay)
     # Shared-person edges extend reach to filmography films no seed points at.
+    # Repeat-seed decay (matches crawl.py): a person's 2nd, 3rd... seed film
+    # confirms the affinity rather than multiplying it, so having several
+    # seeds by one director doesn't drown out people with just one or two.
+    decay = CFG.get("person_repeat_decay", 0.3)
     seed_people = collections.Counter()
     pname = {}
+    repeats = collections.Counter()
     for s in seed_slugs:
         for p, nm in films[s]["directors"]:
-            seed_people[p] += eff[s] * 1.0
+            key = ("d", p)
+            seed_people[p] += eff[s] * 1.0 * (decay ** repeats[key]); repeats[key] += 1
             pname[p] = nm
         for p, nm in films[s]["writers"]:
-            seed_people[p] += eff[s] * 0.5
+            key = ("w", p)
+            seed_people[p] += eff[s] * 0.5 * (decay ** repeats[key]); repeats[key] += 1
             pname[p] = nm
         for i, (p, nm) in enumerate(films[s]["cast"][:12]):
-            seed_people[p] += eff[s] * 0.45 * (0.85 ** i)
+            key = ("c", p)
+            seed_people[p] += eff[s] * 0.45 * (0.85 ** i) * (decay ** repeats[key]); repeats[key] += 1
             pname[p] = nm
     for slug, boost in CFG["person_boost"].items():
         if slug in seed_people:

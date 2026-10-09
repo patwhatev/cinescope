@@ -96,3 +96,12 @@ What Dreams May Come
 | Wild at Heart | 1990 | light (0.5) | 49.06 | <!--slug:wild-at-heart--> |
 | Saw | 2004 | light (0.5) | 47.13 | <!--slug:saw--> |
 | The House That Jack Built | 2018 | light (0.5) | 46.66 | <!--slug:the-house-that-jack-built-2018--> |
+
+## Iteration 03 — 2026-10-08, 4 newly kept
+
+| Film | Year | Weight | Score | |
+|---|---|---|---|---|
+| Halloween | 1978 | light (0.5) | 47.9 | <!--slug:halloween-1978--> |
+| American Psycho | 2000 | light (0.5) | 45.59 | <!--slug:american-psycho--> |
+| A Clockwork Orange | 1971 | light (0.5) | 44.56 | <!--slug:a-clockwork-orange--> |
+| Funny Games | 1997 | light (0.5) | 39.26 | <!--slug:funny-games--> |

@@ -1,3 +1,4 @@
+import collections
 import csv
 import json
 import os
@@ -65,13 +66,27 @@ def label(rec):
 
 
 def select_for_reel(films_sorted, top):
-    """Fresh (ungraded) candidates lead; already-graded films trail so a
-    revisit is still possible but never crowds out new material. Shared by
-    build_ui.py and fetch_posters.py so their film lists can't drift apart.
+    """Fresh (ungraded) candidates lead, capped per director so a handful of
+    well-connected favorites (Lynch, Miike...) can't fill the reel on their
+    own; already-graded films trail so a revisit is still possible but never
+    crowds out new material. Shared by build_ui.py and fetch_posters.py so
+    their film lists can't drift apart.
     """
-    fresh = [f for f in films_sorted if not f["already_graded"]]
-    reviewed = [f for f in films_sorted if f["already_graded"]]
-    return (fresh + reviewed)[:top]
+    cap = config().get("reel_director_cap")
+    fresh, reviewed, seen_dir = [], [], collections.Counter()
+    overflow = []  # capped-out fresh films -- still shown, just after the diverse front
+    for f in films_sorted:
+        if f["already_graded"]:
+            reviewed.append(f)
+            continue
+        dirs = f.get("directors") or []
+        if cap and dirs and max(seen_dir[d] for d in dirs) >= cap:
+            overflow.append(f)
+            continue
+        for d in dirs:
+            seen_dir[d] += 1
+        fresh.append(f)
+    return (fresh + overflow + reviewed)[:top]
 
 
 # ---- verdicts ---------------------------------------------------------------
