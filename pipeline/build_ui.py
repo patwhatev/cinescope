@@ -429,9 +429,12 @@ footer{margin-top:40px; padding-top:18px; border-top:1px solid var(--border);
       <div style="margin-top:8px"><b>Seen it &mdash; stars are enjoyment.</b> 5&#9733; promotes the film
         into the seed set at full weight, 4&#9733; at half weight, 3&#9733; is noted, 1&ndash;2&#9733;
         trains the channel weights as a miss.</div>
-      <div style="margin-top:8px"><b>Not seen &mdash; dots are want-to-see.</b> They train the weights
-        at half strength (a guess about taste isn't a verdict on it) and never become seeds;
-        3&ndash;5 lands on your watchlist. <b>Never</b> counts as a firm miss.</div>
+      <div style="margin-top:8px"><b>Not seen &mdash; dots are how inclined you are to watch it,
+        not a rating.</b> 2 is "maybe later" (barely trains the weights), 3 is "I'll likely watch
+        it," 4&ndash;5 is "I've been meaning to and I know it should be good" &mdash; and the
+        training weight climbs with it, from token at 1&ndash;2 up to nearly as strong as an
+        actual rating at 5. Still never becomes a seed on its own, though &mdash; that still
+        wants a real watch. 3&ndash;5 lands on your watchlist. <b>Never</b> counts as a firm miss.</div>
       <div style="margin-top:8px">Cards graded before this split show their old star as a dashed
         hint and count as unreviewed until you answer &ldquo;seen it?&rdquo;. Change your mind any time.</div>
       <div style="margin-top:8px">Note: letterboxd files a few limited series (Twin Peaks: The Return,
@@ -522,7 +525,12 @@ function runtimeStr(mins){
 
 const RATING_TIPS = {5:'loved it — weighs heavy as a seed', 4:'liked it — weighs light as a seed',
   3:'fine — noted, not promoted', 2:'didn\'t like it', 1:'hated it'};
-const INTEREST_TIPS = {5:'must see', 4:'keen', 3:'maybe', 2:'doubt it', 1:'barely'};
+// Calibrated to how these actually get used, not generic "interest" levels --
+// each number is a distinct confidence claim, and the training weight (see
+// common.INTEREST_WEIGHTS) scales with it: 2 is barely more than noise, 4-5
+// is nearly as strong a signal as an actual rating.
+const INTEREST_TIPS = {5:'been meaning to — I know it should be good', 4:'been meaning to, probably good',
+  3:'I\'ll likely watch it', 2:'yeah, maybe later', 1:'no real pull yet'};
 
 function verdictLabel(st){
   if(st.status === 'seen'){
@@ -537,9 +545,9 @@ function verdictLabel(st){
     if(st.never) return {cls:'minus', stamp:'never', note:'firm no — off the watchlist'};
     const i = st.interest;
     if(i>=4) return {cls:'want', stamp:'watchlist', note:INTEREST_TIPS[i]};
-    if(i===3) return {cls:'', stamp:'watchlist — maybe', note:INTEREST_TIPS[3]};
+    if(i===3) return {cls:'', stamp:'watchlist — likely', note:INTEREST_TIPS[3]};
     if(i) return {cls:'cold', stamp:'low interest', note:INTEREST_TIPS[i]};
-    return {cls:'', stamp:null, note:'how much do you want to see it?'};
+    return {cls:'', stamp:null, note:'how inclined are you to watch it?'};
   }
   if(st.grade) return {cls:'', stamp:'earlier ' + '\u2605'.repeat(st.grade), stampCls:'hint', note:''};
   return {cls:'', stamp:null, note:''};

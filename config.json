@@ -1,9 +1,9 @@
 {
   "weights": {
-    "graph": 0.31,
-    "theme": 0.306,
-    "people": 0.248,
-    "quality": 0.136
+    "graph": 0.275,
+    "theme": 0.292,
+    "people": 0.29,
+    "quality": 0.143
   },
   "token_weights": {
     "mini_theme": 1.0,
@@ -34,5 +34,5 @@
     "opportunity_min_score": 55
   },
   "person_repeat_decay": 0.3,
-  "reel_director_cap": 3
+  "reel_director_cap": null
 }

@@ -52,12 +52,30 @@ def save_films(films):
             fh.write(json.dumps(films[slug], ensure_ascii=False) + "\n")
 
 
+SHORT_MAX_RUNTIME = 40      # minutes; below this, the stricter bar below applies
+SHORT_MIN_RATING_COUNT = 5000
+SHORT_MIN_RATING = 3.7
+
+
 def is_junk(rec, min_count):
-    """Featurettes, making-ofs and near-unrated entries pollute filmographies."""
+    """Featurettes, making-ofs and near-unrated entries pollute filmographies.
+
+    Shorts get a stricter bar than the general floor: a director's DV
+    experiment or a stray music video clears min_rating_count on a technicality
+    (a few hundred ratings) without being remotely what "more like this
+    director's work" means. A short only survives if it's genuinely revered --
+    well-known AND well-regarded -- not just barely counted.
+    """
     if JUNK.search(rec.get("title") or ""):
         return True
     if (rec.get("rating_count") or 0) < min_count:
         return True
+    runtime = rec.get("runtime")
+    if runtime and runtime < SHORT_MAX_RUNTIME:
+        if (rec.get("rating_count") or 0) < SHORT_MIN_RATING_COUNT:
+            return True
+        if (rec.get("rating") or 0) < SHORT_MIN_RATING:
+            return True
     return False
 
 
@@ -98,7 +116,17 @@ def select_for_reel(films_sorted, top):
 GRADE_COLS = ["rank", "slug", "title", "year", "score", "g", "t", "p", "q",
               "grade", "seen", "rating", "interest", "never", "note"]
 
-INTEREST_WEIGHT = 0.5   # want-to-see is a guess about taste, not a verdict on it
+# Want-to-see isn't one kind of guess -- "maybe later" and "I've been meaning
+# to and I know it should be good" are very different confidence levels, so
+# the training weight scales with the number instead of using one flat
+# constant for the whole 1-5 range:
+#   1  no real pull yet                        -> barely more than noise
+#   2  "yeah, maybe later"                      -> low-confidence, low weight
+#   3  "I'll likely watch it"                   -> genuine intent
+#   4  "been meaning to, I know it's good"      -> strong, near rating-grade
+#   5  same as 4, at its most certain           -> about as strong as having seen it
+INTEREST_WEIGHTS = {1: 0.15, 2: 0.3, 3: 0.55, 4: 0.8, 5: 0.95}
+INTEREST_WEIGHT = 0.5   # kept as a fallback/default for any stray non-1-5 value
 
 
 def _num(v):
@@ -115,10 +143,10 @@ def _flag(v):
 def verdict(row):
     """One grades.csv row -> (kind, value 1-5, weight), or None if ungraded.
 
-      seen + rating      -> ("rating",   rating,   1.0)  enjoyment; can seed
-      unseen + never     -> ("never",    1,        1.0)  a hard no
-      unseen + interest  -> ("interest", interest, 0.5)  watchlist; never seeds
-      only an old grade  -> ("legacy",   grade,    1.0)  pre-split, ambiguous
+      seen + rating      -> ("rating",   rating,   1.0)         enjoyment; can seed
+      unseen + never     -> ("never",    1,        1.0)         a hard no
+      unseen + interest  -> ("interest", interest, 0.15-0.95)   see INTEREST_WEIGHTS; never seeds
+      only an old grade  -> ("legacy",   grade,    1.0)         pre-split, ambiguous
     """
     seen = (row.get("seen") or "").strip().lower()
     rating, interest = _num(row.get("rating")), _num(row.get("interest"))
@@ -127,7 +155,8 @@ def verdict(row):
     if seen.startswith("n") and _flag(row.get("never")):
         return ("never", 1.0, 1.0)
     if seen.startswith("n") and interest:
-        return ("interest", interest, INTEREST_WEIGHT)
+        w = INTEREST_WEIGHTS.get(int(interest), INTEREST_WEIGHT)
+        return ("interest", interest, w)
     grade = _num(row.get("grade"))
     if grade:
         return ("legacy", grade, 1.0)

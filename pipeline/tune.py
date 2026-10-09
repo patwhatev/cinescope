@@ -94,8 +94,14 @@ def main():
              for k in ("rating", "interest", "never", "legacy")}
     print("seen + rated      %d  (%.0f%% — high is good targeting, bad novelty)"
           % (kinds["rating"], 100.0 * kinds["rating"] / graded))
-    print("unseen interest   %d  (weighted %.1f)   never %d   untriaged old grade %d"
-          % (kinds["interest"], common.INTEREST_WEIGHT, kinds["never"], kinds["legacy"]))
+    interest_rows = [r for r in all_rows if r["kind"] == "interest"]
+    interest_breakdown = collections.Counter(int(r["val"]) for r in interest_rows)
+    print("unseen interest   %d  (never %d, untriaged old grade %d)"
+          % (kinds["interest"], kinds["never"], kinds["legacy"]))
+    if interest_rows:
+        print("  by level (training weight in parens): " + ", ".join(
+            "%d\u00d7%d(%.2f)" % (interest_breakdown.get(i, 0), i, common.INTEREST_WEIGHTS[i])
+            for i in (1, 2, 3, 4, 5)))
     seen_rows = [r for r in all_rows if r["kind"] == "rating"]
     if seen_rows:
         sr_hits = sum(1 for r in seen_rows if r["val"] >= 4)
