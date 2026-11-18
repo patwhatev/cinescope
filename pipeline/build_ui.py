@@ -1,16 +1,17 @@
-"""Render data/scores.json into the Dailies grading page (out/dailies.html).
+"""Render a pool's scores.json into its Dailies grading page.
 
-Static HTML/CSS/JS, no build step, no library. The film pool is baked in as a
-JSON blob at publish time. Grading state's storage is swappable via MODE:
+  python3 pipeline/build_ui.py            -- the current pool (CINESCOPE_POOL)
+  CINESCOPE_POOL=mix python3 pipeline/build_ui.py
+                                          -- the profile's mix reel: every pool's
+                                             reel interleaved, each card tagged
+                                             with the pool it came from
 
-  MODE=artifact (default) -- writes through the Claude Artifact `db`
-    capability. Only works served from claude.ai.
-  MODE=local -- writes through a tiny JSON API (see pipeline/serve.py),
-    for self-hosting. Run pipeline/serve.py and open http://localhost:8420.
+Static HTML/CSS/JS, no build step, no library. The film list is baked in as a
+JSON blob. Grading state's storage is swappable via MODE:
 
-Either way the film data and grading UI are identical; only the storage
-backend's ~20 lines of JS differ (see ARTIFACT_BACKEND_JS / LOCAL_BACKEND_JS
-below). pipeline/pull_grades.py reads the result back for tuning either way.
+  MODE=local (default) -- writes through the JSON API in pipeline/serve.py.
+  MODE=artifact -- writes through the Claude Artifact `db` capability; only
+    works served from claude.ai. pull_grades.py reads a dump of it back.
 """
 import json
 import os
@@ -18,78 +19,132 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
+import pools
 
-BUILD_TOP = int(os.environ.get("BUILD_TOP", "80"))
-ITER = os.environ.get("ITER", "01")
-MODE = os.environ.get("MODE", "artifact")
+ITER = os.environ.get("ITER", "")
+MODE = os.environ.get("MODE", "local")
+
+
+def card(f, pool, poster_dir, triage=False):
+    c = f["channels"]
+    has_poster = os.path.exists(os.path.join(poster_dir, f["slug"] + ".jpg"))
+    prefix = "/posters/" if MODE == "local" else "posters/"
+    return {
+        "slug": f["slug"], "title": f["title"], "year": f["year"], "pool": pool,
+        "score": f["score"], "g": c["g"], "t": c["t"], "p": c["p"], "q": c["q"],
+        "pop": f["pop_adj"], "rating": f["rating"], "count": f["rating_count"],
+        "genres": f["genres"], "mini": f["mini_themes"][:3],
+        "dirs": f["directors"], "cast": f.get("cast_billed") or f["cast"][:6],
+        "viaSeeds": f["via_seeds"][:3], "shared": f["shared_tokens"][:3],
+        "viaPeople": f["via_people"][:3],
+        "imdb": f.get("imdb"), "tmdb": f.get("tmdb"),
+        "synopsis": f.get("synopsis") or "",
+        "runtime": f.get("runtime"),
+        "poster": (prefix + "%s.jpg" % f["slug"]) if has_poster else None,
+        "triage": triage,
+    }
+
+
+def pool_cards(P, recs, rows, assignment, poster_dir, top, with_triage=True):
+    cfg = common.config(P.pool)
+    S = common.load_json(P.scores)
+    if not S:
+        return None, []
+    # Fresh candidates lead; anything already graded keeps a trailing slot so
+    # it's still visible (dimmed, stamped) if you want to revisit a call.
+    selected = common.select_for_reel(S["films"], top, cfg)
+    out = [card(f, P.pool, poster_dir) for f in selected]
+    if with_triage:
+        # Graded films of this pool the reel doesn't carry -- promoted seeds,
+        # films that fell out of the top slice -- trail at the end so they can
+        # still be re-triaged. Seeds aren't scored, so they come straight
+        # from films.jsonl with no channel data.
+        byslug = {f["slug"]: f for f in S["films"]}
+        for slug in common.triage_slugs([f["slug"] for f in selected], P.pool, P.profile,
+                                        assignment):
+            f = byslug.get(slug) or (unscored(recs[slug]) if slug in recs else None)
+            if f:
+                out.append(card(f, P.pool, poster_dir, triage=True))
+    return S, out
 
 
 def main():
-    with open(os.path.join(common.DATA, "scores.json"), encoding="utf-8") as fh:
-        S = json.load(fh)
-    CFG = common.config()
-
-    # Fresh candidates lead; anything already starred keeps a trailing slot so
-    # it's still visible (dimmed, stamped) if you want to revisit a weight.
-    selected = common.select_for_reel(S["films"], BUILD_TOP)
-
-    # Anything graded that the reel doesn't carry -- promoted seeds, films
-    # that fell out of the top slice -- trails at the end so it can still be
-    # re-triaged as seen / unseen. Seeds aren't scored, so they come straight
-    # from films.jsonl with no channel data.
-    byslug = {f["slug"]: f for f in S["films"]}
-    recs = common.load_films()
-    triage = []
-    for slug in common.triage_slugs([f["slug"] for f in selected]):
-        if slug in byslug:
-            triage.append(byslug[slug])
-        elif slug in recs:
-            triage.append(unscored(recs[slug]))
-
+    profile = common.profile_name()
+    prof = common.load_profile(profile)
+    pool_names = list(prof.get("pools") or {})
+    pool = os.environ.get("CINESCOPE_POOL") or common.pool_name(profile)
+    mix = pool == common.MIX
+    cfg = common.config(None if mix else pool, profile)
+    sc = common.scale(cfg)
+    top = int(os.environ.get("BUILD_TOP") or cfg.get("reel_size", 80))
     poster_dir = os.path.join(common.DATA, "posters")
-    films = []
-    for f in selected + triage:
-        c = f["channels"]
-        has_poster = os.path.exists(os.path.join(poster_dir, f["slug"] + ".jpg"))
-        films.append({
-            "slug": f["slug"], "title": f["title"], "year": f["year"],
-            "score": f["score"], "g": c["g"], "t": c["t"], "p": c["p"], "q": c["q"],
-            "pop": f["pop_adj"], "rating": f["rating"], "count": f["rating_count"],
-            "genres": f["genres"], "mini": f["mini_themes"][:3],
-            "dirs": f["directors"], "cast": f.get("cast_billed") or f["cast"][:6],
-            "viaSeeds": f["via_seeds"][:3], "shared": f["shared_tokens"][:3],
-            "viaPeople": f["via_people"][:3],
-            "imdb": f.get("imdb"), "tmdb": f.get("tmdb"),
-            "synopsis": f.get("synopsis") or "",
-            "runtime": f.get("runtime"),
-            "poster": ("posters/%s.jpg" % f["slug"]) if has_poster else None,
-            "triage": f in triage,
-        })
+    recs = common.load_films()
+    rows = common.read_db_grades(profile)
+    assignment = pools.assign(profile, rows, recs)
 
-    people = [p for p in S["people"][:16] if p["score"] >= 0.5]
+    if not mix:
+        P = common.paths(profile, pool)
+        S, films = pool_cards(P, recs, rows, assignment, poster_dir, top)
+        if S is None:
+            sys.exit("no scores for %s/%s yet -- run crawl.py + score.py first" % (profile, pool))
+        people = [p for p in S["people"][:16] if p["score"] >= 0.5]
+        stats = {"films": S["pool_size"], "scored": S["scored"], "seeds": S["seed_count"]}
+        weights = cfg["weights"]
+        out_path = P.dailies
+    else:
+        # Round-robin across pools, each pool's own reel order preserved; a
+        # film two pools both want shows once, under the pool ranking it higher.
+        per = max(12, top // max(1, len(pool_names)))
+        lanes, stats = [], {"films": 0, "scored": 0, "seeds": 0}
+        for name in pool_names:
+            S, cards = pool_cards(common.paths(profile, name), recs, rows, assignment,
+                                  poster_dir, per, with_triage=False)
+            if S is None:
+                continue
+            lanes.append(cards)
+            stats["films"] = max(stats["films"], S["pool_size"])
+            stats["scored"] += S["scored"]
+            stats["seeds"] += S["seed_count"]
+        if not lanes:
+            sys.exit("no pool of %s has scores yet -- run the pipeline first" % profile)
+        best = {}
+        for cards in lanes:
+            for i, c in enumerate(cards):
+                if c["slug"] not in best or i < best[c["slug"]][0]:
+                    best[c["slug"]] = (i, c["pool"])
+        films, i = [], 0
+        while any(i < len(l) for l in lanes):
+            for cards in lanes:
+                if i < len(cards) and best[cards[i]["slug"]][1] == cards[i]["pool"] \
+                        and cards[i]["slug"] not in {f["slug"] for f in films}:
+                    films.append(cards[i])
+            i += 1
+        people, weights = [], None
+        out_path = common.paths(profile, pool_names[0]).mix_html
 
     payload = {
-        "iteration": ITER, "pool": S["pool"], "scored": S["scored"],
-        "seeds": S["seed_count"], "weights": CFG["weights"],
-        "films": films, "people": people,
+        "iteration": ITER, "profile": profile, "pool": pool,
+        "pools": [{"name": n, "description": (prof["pools"][n] or {}).get("description", "")}
+                  for n in pool_names],
+        "stats": stats, "weights": weights, "films": films, "people": people,
+        "scale": {k: sc[k] for k in ("hit_min", "miss_max", "dislike_max", "seed_tiers",
+                                     "rating_tips", "interest_tips", "description")},
+        "mode": MODE,
     }
-    data_json = json.dumps(payload, ensure_ascii=False)
+    data_json = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
 
     backend_js = LOCAL_BACKEND_JS if MODE == "local" else ARTIFACT_BACKEND_JS
     html = (HTML_TEMPLATE
             .replace("__DATA_JSON__", data_json)
-            .replace("__ITER__", ITER)
             .replace("__BACKEND_JS__", backend_js))
 
-    os.makedirs(common.OUT, exist_ok=True)
-    out_path = os.path.join(common.OUT, "dailies.html")
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(html)
 
     n_posters = sum(1 for f in films if f["poster"])
-    print("wrote %s [mode=%s] (%d films + %d to re-triage, %d with posters, "
-          "%d bytes of embedded data)"
-          % (out_path, MODE, len(selected), len(triage), n_posters, len(data_json)))
+    print("wrote %s [mode=%s] (%d cards, %d with posters, %d bytes of embedded data)"
+          % (out_path, MODE, len(films), n_posters, len(data_json)))
 
 
 def unscored(rec):
@@ -169,6 +224,17 @@ a{color:var(--accent-strong)}
 .stat{text-align:right}
 .stat .n{font-size:22px; font-weight:600}
 .stat .l{font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-faint)}
+
+/* ---- profile / pool nav ---- */
+nav.pools{display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:0 0 14px}
+nav.pools a{font-size:13px; padding:5px 11px; border-radius:999px; border:1px solid var(--border);
+  color:var(--text-dim); text-decoration:none; background:var(--surface)}
+nav.pools a.on{border-color:var(--accent); color:var(--accent-strong); background:var(--accent-soft); font-weight:600}
+nav.pools .sep{flex:1}
+nav.pools select{font:inherit; font-size:13px; padding:4px 8px; border-radius:8px;
+  border:1px solid var(--border); background:var(--surface); color:var(--text)}
+.pool-tag{font-size:11px; padding:1px 7px; border-radius:999px; background:var(--teal-soft); color:var(--teal);
+  margin-left:6px; vertical-align:middle; font-weight:600}
 
 /* ---- methodology strip ---- */
 details.method{background:var(--surface); border:1px solid var(--border); border-radius:10px;
@@ -362,6 +428,17 @@ details.method[open] summary::before{transform:rotate(90deg)}
 .wl-dots{flex:none; display:flex; gap:2px; font-size:13px}
 .wl-dots span{color:var(--border)}
 .wl-dots span.lit{color:var(--accent)}
+.wl-act{flex:none; display:flex; flex-direction:column; align-items:flex-end; gap:6px}
+.wl-btn{background:var(--surface-2); border:1px solid var(--border); border-radius:8px;
+  color:var(--text-dim); font-size:12px; padding:4px 9px; cursor:pointer}
+.wl-btn:hover{color:var(--accent-strong); border-color:var(--accent)}
+.wl-stars{display:flex; gap:3px; align-items:center}
+.wl-stars button{background:none; border:none; font-size:19px; color:var(--border); cursor:pointer; padding:0 1px}
+.wl-stars button.preview{color:var(--accent)}
+.wl-tip{font-size:11.5px; color:var(--text-faint); min-height:14px; text-align:right}
+.wl-notice{background:var(--accent-soft); border-radius:8px; padding:9px 12px; margin:6px 0 4px;
+  font-size:13px; color:var(--text-dim); display:flex; justify-content:space-between; gap:10px; align-items:center}
+.wl-notice button{background:none; border:none; color:var(--accent-strong); cursor:pointer; font-size:13px; font-weight:600}
 
 /* ---- re-weigh ---- */
 .reweigh-card{max-width:640px}
@@ -397,25 +474,27 @@ footer{margin-top:40px; padding-top:18px; border-top:1px solid var(--border);
 
   <div class="masthead">
     <div>
-      <div class="eyebrow">Reel __ITER__ &middot; Screening Notes</div>
+      <div class="eyebrow" id="eyebrow">Screening Notes</div>
       <h1>Dailies</h1>
       <div class="sub">Candidates pulled from your letterboxd taste graph. Seen it? Star how much you
         enjoyed it. Not yet? Say how much you want to &mdash; or mark it never.</div>
     </div>
     <div class="stats">
-      <div class="stat"><div class="n mono" id="stat-pool">&ndash;</div><div class="l">pool</div></div>
+      <div class="stat"><div class="n mono" id="stat-pool">&ndash;</div><div class="l">films</div></div>
       <div class="stat"><div class="n mono" id="stat-scored">&ndash;</div><div class="l">scored</div></div>
       <div class="stat"><div class="n mono" id="stat-seeds">&ndash;</div><div class="l">seeds</div></div>
     </div>
   </div>
 
+  <nav class="pools" id="pools"></nav>
+
   <details class="method">
     <summary>How this reel is cut</summary>
     <div class="method-body">
-      Four signal channels score every candidate against your seed films, each normalized
-      independently, then blended by the weights below &mdash; your grading is what moves them.
-      A popularity correction then damps films so canonical they sit adjacent to everything,
-      and lifts the deep cuts, since that's where this profile actually lives.
+      Each pool is scored on its own: four signal channels score every candidate against
+      that pool's seed films, each normalized independently, then blended by weights your
+      grading moves. An optional popularity lean (set per profile) can then tilt toward
+      lesser-known or better-known films. The mix reel interleaves every pool.
       <div class="chan-legend">
         <div class="ch"><span class="sw" style="background:var(--accent)"></span>
           <b>graph</b>&nbsp;&mdash; how many seeds converge on it, letterboxd similarity edges</div>
@@ -426,19 +505,14 @@ footer{margin-top:40px; padding-top:18px; border-top:1px solid var(--border);
         <div class="ch"><span class="sw" style="background:var(--text-faint)"></span>
           <b>quality</b>&nbsp;&mdash; letterboxd rating, shrunk toward the mean by rating count</div>
       </div>
-      <div style="margin-top:8px"><b>Seen it &mdash; stars are enjoyment.</b> 5&#9733; promotes the film
-        into the seed set at full weight, 4&#9733; at half weight, 3&#9733; is noted, 1&ndash;2&#9733;
-        trains the channel weights as a miss.</div>
-      <div style="margin-top:8px"><b>Not seen &mdash; dots are how inclined you are to watch it,
-        not a rating.</b> 2 is "maybe later" (barely trains the weights), 3 is "I'll likely watch
-        it," 4&ndash;5 is "I've been meaning to and I know it should be good" &mdash; and the
-        training weight climbs with it, from token at 1&ndash;2 up to nearly as strong as an
-        actual rating at 5. Still never becomes a seed on its own, though &mdash; that still
-        wants a real watch. 3&ndash;5 lands on your watchlist. <b>Never</b> counts as a firm miss.</div>
+      <div style="margin-top:8px" id="scale-help"></div>
+      <div style="margin-top:8px"><b>Never</b> is stronger than a 1: offensive or just plain bad,
+        don't show me things like this. Films letterboxd lists as similar to it, its flavour of
+        theme, and the people in it all get pushed down in the next reel &mdash; in every pool.</div>
       <div style="margin-top:8px">Cards graded before this split show their old star as a dashed
         hint and count as unreviewed until you answer &ldquo;seen it?&rdquo;. Change your mind any time.</div>
-      <div style="margin-top:8px">Note: letterboxd files a few limited series (Twin Peaks: The Return,
-        Baby Reindeer) under /film/ &mdash; pass on those if TV isn't what you're after.</div>
+      <div style="margin-top:8px">Note: letterboxd files a few limited series under /film/ &mdash;
+        pass on those if TV isn't what you're after.</div>
     </div>
   </details>
 
@@ -477,11 +551,56 @@ let grades = {};
 function $(s, el=document){ return el.querySelector(s); }
 function el(tag, cls, html){ const e=document.createElement(tag); if(cls) e.className=cls; if(html!=null) e.innerHTML=html; return e; }
 
+const SC = DATA.scale;
+const API = '/api/p/' + encodeURIComponent(DATA.profile);
+const HIT = SC.hit_min, DISLIKE = SC.dislike_max;
+const IS_MIX = DATA.pool === 'mix';
+function seedTier(r){ return SC.seed_tiers[String(r)] || 0; }
+
 function renderStats(){
-  $('#stat-pool').textContent = DATA.pool;
-  $('#stat-scored').textContent = DATA.scored;
-  $('#stat-seeds').textContent = DATA.seeds;
+  $('#stat-pool').textContent = DATA.stats.films;
+  $('#stat-scored').textContent = DATA.stats.scored;
+  $('#stat-seeds').textContent = DATA.stats.seeds;
   $('#t-total').textContent = DATA.films.length;
+  $('#eyebrow').textContent = `${DATA.profile} \u00b7 ${IS_MIX ? 'mix of all pools' : DATA.pool}`
+    + (DATA.iteration ? ` \u00b7 reel ${DATA.iteration}` : '');
+  document.title = `Dailies \u2014 ${DATA.profile} / ${DATA.pool}`;
+  const tiers = Object.keys(SC.seed_tiers).sort().reverse();
+  $('#scale-help').innerHTML =
+    `<b>Seen it &mdash; stars are enjoyment.</b> ${SC.description} ` +
+    (tiers.length ? `${tiers.join(' and ')}&#9733; promote the film into this pool's seeds. ` : '') +
+    `${HIT}&#9733;+ counts as a hit and widens the search around it; ${DISLIKE}&#9733; and below push away.` +
+    `<div style="margin-top:8px"><b>Not seen &mdash; dots are how much you want to watch it.</b> ` +
+    `${HIT}+ is a hit and lands on your watchlist; ${SC.miss_max} is a mild no. Want-to-see never ` +
+    `makes a seed &mdash; that wants a real watch.</div>`;
+}
+
+function renderPools(){
+  const nav = $('#pools'); nav.innerHTML = '';
+  if(DATA.mode !== 'local') return;
+  const base = '/p/' + encodeURIComponent(DATA.profile) + '/';
+  if(DATA.pools.length > 1){
+    const a = el('a', IS_MIX ? 'on' : '', 'mix'); a.href = base; a.title = 'every pool, interleaved';
+    nav.appendChild(a);
+  }
+  for(const p of DATA.pools){
+    const a = el('a', p.name === DATA.pool ? 'on' : '', p.name);
+    a.href = base + encodeURIComponent(p.name) + '/';
+    if(p.description) a.title = p.description;
+    nav.appendChild(a);
+  }
+  nav.appendChild(el('span','sep'));
+  fetch('/api/profiles').then(r => r.json()).then(list => {
+    if(!list || list.length < 2) return;
+    const sel = el('select');
+    for(const p of list){
+      const o = el('option', '', p.name); o.value = p.name;
+      if(p.name === DATA.profile) o.selected = true;
+      sel.appendChild(o);
+    }
+    sel.onchange = () => { location.href = '/p/' + encodeURIComponent(sel.value) + '/'; };
+    nav.appendChild(sel);
+  }).catch(() => {});
 }
 
 function renderPeople(){
@@ -523,29 +642,24 @@ function runtimeStr(mins){
   return h ? `${h}h ${m}m` : `${m}m`;
 }
 
-const RATING_TIPS = {5:'loved it — weighs heavy as a seed', 4:'liked it — weighs light as a seed',
-  3:'fine — noted, not promoted', 2:'didn\'t like it', 1:'hated it'};
-// Calibrated to how these actually get used, not generic "interest" levels --
-// each number is a distinct confidence claim, and the training weight (see
-// common.INTEREST_WEIGHTS) scales with it: 2 is barely more than noise, 4-5
-// is nearly as strong a signal as an actual rating.
-const INTEREST_TIPS = {5:'been meaning to — I know it should be good', 4:'been meaning to, probably good',
-  3:'I\'ll likely watch it', 2:'yeah, maybe later', 1:'no real pull yet'};
+// What each number means is the profile's scale preset (common.SCALES).
+const RATING_TIPS = SC.rating_tips, INTEREST_TIPS = SC.interest_tips;
 
 function verdictLabel(st){
   if(st.status === 'seen'){
     const r = st.rating;
-    if(r===5) return {cls:'heavy', stamp:'loved — heavy seed', note:RATING_TIPS[5]};
-    if(r===4) return {cls:'light', stamp:'liked — light seed', note:RATING_TIPS[4]};
-    if(r===3) return {cls:'', stamp:'seen — fine', note:RATING_TIPS[3]};
-    if(r) return {cls:'minus', stamp:'seen — miss', note:RATING_TIPS[r]};
+    const tier = seedTier(r);
+    if(tier >= 1) return {cls:'heavy', stamp:'loved — heavy seed', note:RATING_TIPS[r]};
+    if(tier) return {cls:'light', stamp:'liked — light seed', note:RATING_TIPS[r]};
+    if(r && r >= HIT) return {cls:'', stamp:'seen — good', note:RATING_TIPS[r]};
+    if(r && r <= DISLIKE) return {cls:'minus', stamp:'seen — miss', note:RATING_TIPS[r]};
+    if(r) return {cls:'', stamp:'seen — fine', note:RATING_TIPS[r]};
     return {cls:'', stamp:null, note:'how much did you enjoy it?'};
   }
   if(st.status === 'unseen'){
-    if(st.never) return {cls:'minus', stamp:'never', note:'firm no — off the watchlist'};
+    if(st.never) return {cls:'minus', stamp:'never', note:'don\'t show me things like this'};
     const i = st.interest;
-    if(i>=4) return {cls:'want', stamp:'watchlist', note:INTEREST_TIPS[i]};
-    if(i===3) return {cls:'', stamp:'watchlist — likely', note:INTEREST_TIPS[3]};
+    if(i && i >= HIT) return {cls:'want', stamp:'watchlist', note:INTEREST_TIPS[i]};
     if(i) return {cls:'cold', stamp:'low interest', note:INTEREST_TIPS[i]};
     return {cls:'', stamp:null, note:'how inclined are you to watch it?'};
   }
@@ -577,7 +691,8 @@ function renderCard(f, idx){
   const top = el('div','card-top');
   const head = el('div','card-head');
   head.innerHTML = `<span class="rank mono">${String(idx+1).padStart(2,'0')}</span>
-    <span class="title">${f.title}</span><span class="year">${f.year}</span>`;
+    <span class="title">${f.title}</span><span class="year">${f.year}</span>`
+    + (IS_MIX ? `<span class="pool-tag">${f.pool}</span>` : '');
   top.appendChild(head);
   top.appendChild(el('div','score', f.score==null ? 'seed' : f.score.toFixed(1)));
   body.appendChild(top);
@@ -616,8 +731,8 @@ function renderCard(f, idx){
       b.title = RATING_TIPS[i];
       if(st.rating && i<=st.rating){
         b.classList.add('lit');
-        if(st.rating<=2) b.classList.add('bad');
-        else if(st.rating===4) b.classList.add('weak');
+        if(st.rating<=DISLIKE) b.classList.add('bad');
+        else if(seedTier(st.rating) && seedTier(st.rating) < 1) b.classList.add('weak');
       }
       b.onclick = () => setRating(f, i);
       stars.appendChild(b);
@@ -631,14 +746,14 @@ function renderCard(f, idx){
       b.title = INTEREST_TIPS[i];
       if(st.interest && i<=st.interest){
         b.classList.add('lit');
-        if(st.interest<=2) b.classList.add('bad');
+        if(st.interest<HIT) b.classList.add('bad');
       }
       b.onclick = () => setInterest(f, i);
       pips.appendChild(b);
     }
     actions.appendChild(pips);
     const nv = el('button','btn never','never');
-    nv.title = 'garbage / bad signal / would never watch';
+    nv.title = "offensive or just plain bad — don't show me things like this";
     if(st.never) nv.classList.add('on');
     nv.onclick = () => toggleNever(f);
     actions.appendChild(nv);
@@ -691,7 +806,8 @@ const queues = {};
 function writeDoc(slug){
   const f = DATA.films.find(x=>x.slug===slug);
   queues[slug] = (queues[slug] || Promise.resolve()).then(() =>
-    saveDoc(slug, Object.assign({slug, title: f?f.title:slug}, cardState(slug), {ts: Date.now()}))
+    saveDoc(slug, Object.assign({slug, title: f?f.title:slug}, cardState(slug),
+                                {pool: f ? f.pool : null, ts: Date.now()}))
   ).catch(e => console.warn('grade write failed', e));
 }
 
@@ -700,7 +816,7 @@ function renderTally(){
   for(const f of DATA.films){
     const st = cardState(f.slug);
     if(st.status === 'seen' && st.rating) rated++;
-    if(st.status === 'unseen' && st.interest >= 3) watch++;
+    if(st.status === 'unseen' && st.interest >= HIT) watch++;
     if(st.status === 'unseen' && st.never) never++;
     if(st.grade && !isReviewed(st)) legacy++;
     if(isReviewed(st)) graded++;
@@ -758,9 +874,9 @@ function sessionSetSeen(f, val){
   renderSession();
 }
 
-// Stage 2, unseen branch: "how inclined are you to watch?" 1-5 is interest;
-// left arrow (or X) is the zero case -- don't want to see it at all, full
-// exclude from the weighting, not a low number on the interest scale.
+// Stage 2, unseen branch: "how much do you want to watch it?" 1-5 is
+// interest; left arrow (or X) is never -- below the scale entirely:
+// offensive or plain bad, push the next reel away from things like it.
 function sessionRate(f, i){
   if(cardState(f.slug).status === 'seen') setRating(f, i); else setInterest(f, i);
   sessionAdvance();
@@ -846,13 +962,13 @@ function renderSession(){
     }
     row.appendChild(stars);
     if(!seen){
-      const nv = el('button','session-never','\u2190 Not at all / Never');
-      nv.title = "don't want to see it at all -- excluded from weighting, not rated";
+      const nv = el('button','session-never',"\u2190 Never — don't show me this");
+      nv.title = "offensive or just plain bad -- don't show me things like this";
       nv.onclick = () => sessionNever(f);
       row.appendChild(nv);
     }
     stage.appendChild(row);
-    stage.appendChild(el('div','session-hint', seen ? 'press 1-5, or X for hated it' : 'press 1-5, or \u2190 / X for not at all'));
+    stage.appendChild(el('div','session-hint', seen ? 'press 1-5, or X for hated it' : `press 1-5 (${HIT}+ = want), or \u2190 / X for never`));
   }
   card.appendChild(stage);
 }
@@ -871,20 +987,21 @@ function renderSessionDone(){
   card.appendChild(done);
 }
 
-// ---- watchlist: unseen films flagged interest>=3, sorted by how much you
+// ---- watchlist: unseen films at the scale's hit level+, sorted by how much you
 // want to see them. Pure client-side read of the same grades/DATA.films
 // state the list view already has -- no extra round trip. ------------------
 function watchlistItems(){
   const items = [];
   for(const f of DATA.films){
     const st = cardState(f.slug);
-    if(st.status === 'unseen' && st.interest >= 3) items.push({f, interest: st.interest});
+    if(st.status === 'unseen' && st.interest >= HIT) items.push({f, interest: st.interest});
   }
   items.sort((a,b) => (b.interest - a.interest) || ((b.f.score||0) - (a.f.score||0)));
   return items;
 }
 
 function openWatchlist(){
+  wlRating = null; wlLast = null;
   renderWatchlist();
   $('#watchlist-overlay').classList.add('open');
   document.addEventListener('keydown', watchlistKeydown);
@@ -905,6 +1022,16 @@ function renderWatchlist(){
   top.appendChild(exit);
   card.appendChild(top);
 
+  if(wlLast){
+    const n = el('div','wl-notice');
+    n.appendChild(el('span','', `Rated <b>${wlLast.f.title}</b> ${'★'.repeat(wlLast.rating)} &mdash; `+
+      `${RATING_TIPS[wlLast.rating]}. Counts toward seeding on the next re-weigh.`));
+    const undo = el('button','','undo');
+    undo.onclick = () => { update(wlLast.f, wlLast.prev); wlLast = null; renderWatchlist(); };
+    n.appendChild(undo);
+    card.appendChild(n);
+  }
+
   const items = watchlistItems();
   if(!items.length){
     card.appendChild(el('div','wl-empty',
@@ -922,11 +1049,46 @@ function renderWatchlist(){
     info.innerHTML = `<span class="title">${f.title}</span><span class="year">${f.year}</span>`;
     info.appendChild(el('div','meta', `dir. ${f.dirs.join(', ')||'&mdash;'} &middot; ${f.genres.join(', ')||'&mdash;'}`));
     row.appendChild(info);
-    const dots = el('div','wl-dots');
-    for(let i=1;i<=5;i++) dots.appendChild(el('span','', i<=interest ? '\u25cf' : '\u25cb'));
-    row.appendChild(dots);
+    const act = el('div','wl-act');
+    if(wlRating === f.slug){
+      const stars = el('div','wl-stars');
+      const tip = el('div','wl-tip','how much did you enjoy it?');
+      const btns = [];
+      for(let i=1;i<=5;i++){
+        const b = el('button','', '\u2605');
+        b.title = RATING_TIPS[i];
+        b.onmouseenter = () => { btns.forEach((x,j) => x.classList.toggle('preview', j < i)); tip.textContent = RATING_TIPS[i]; };
+        b.onclick = () => rateWatched(f, i);
+        btns.push(b); stars.appendChild(b);
+      }
+      const cancel = el('button','wl-btn','\u2715');
+      cancel.onclick = () => { wlRating = null; renderWatchlist(); };
+      stars.appendChild(cancel);
+      act.appendChild(stars);
+      act.appendChild(tip);
+    } else {
+      const dots = el('div','wl-dots');
+      for(let i=1;i<=5;i++) dots.appendChild(el('span', i<=interest ? 'lit' : '', i<=interest ? '\u25cf' : '\u25cb'));
+      act.appendChild(dots);
+      const watched = el('button','wl-btn','watched it \u2192 rate');
+      watched.onclick = () => { wlRating = f.slug; renderWatchlist(); };
+      act.appendChild(watched);
+    }
+    row.appendChild(act);
     card.appendChild(row);
   }
+}
+
+// Watched something off the watchlist: it becomes seen + rated, the same
+// state the list view and review session write, so pull_grades/promote_seeds
+// pick it up on the next re-weigh (seed tiers seed, hits anchor, dislikes push away).
+let wlRating = null, wlLast = null;
+function rateWatched(f, rating){
+  const prev = Object.assign({}, cardState(f.slug));
+  update(f, {status:'seen', rating, interest:null, never:false});
+  wlRating = null;
+  wlLast = {f, rating, prev};
+  renderWatchlist();
 }
 
 // ---- re-weigh: triggers the full pipeline (pull grades -> tune -> promote
@@ -942,7 +1104,7 @@ function openReweigh(){
   renderReweighShell();
   $('#reweigh-overlay').classList.add('open');
   $('#btn-reweigh').disabled = true;
-  fetch('/api/reweigh', {method:'POST'}).then(r => r.json()).then(d => {
+  fetch(API + '/reweigh?pool=' + encodeURIComponent(DATA.pool), {method:'POST'}).then(r => r.json()).then(d => {
     if(d.error && d.error !== 'already running'){ reweighShowFatal(d.error); return; }
     pollReweigh();
     reweighTimer = setInterval(pollReweigh, 1500);
@@ -971,8 +1133,8 @@ function renderReweighShell(){
   top.appendChild(exit);
   card.appendChild(top);
   card.appendChild(el('div','reweigh-intro',
-    'Pulls your grading into the model, retunes the four channel weights, folds confirmed '+
-    'keepers into the seed set, re-crawls letterboxd and rescores everything. Several minutes, '+
+    (IS_MIX ? 'For every pool: pulls' : 'Pulls') + ' your grading into the model, retunes the channel weights, folds confirmed '+
+    'keepers into the seeds, re-crawls letterboxd and rescores. Several minutes per pool, '+
     'typically. Closing this window does not stop it \u2014 keep grading, check back any time.'));
   const status = el('div','reweigh-status');
   status.appendChild(el('div','reweigh-spinner'));
@@ -982,7 +1144,7 @@ function renderReweighShell(){
 }
 
 function pollReweigh(){
-  fetch('/api/reweigh').then(r => r.json()).then(d => {
+  fetch(API + '/reweigh').then(r => r.json()).then(d => {
     const card = $('#reweigh-card');
     if(!card) return;
     let status = card.querySelector('.reweigh-status');
@@ -1030,6 +1192,7 @@ $('#btn-reweigh').style.display = 'none'; // no server to run a pipeline on clau
 
 async function boot(){
   renderStats();
+  renderPools();
   renderPeople();
   renderReel();
   try{
@@ -1047,8 +1210,8 @@ async function boot(){
 boot();"""
 
 LOCAL_BACKEND_JS = r"""async function fetchGrades(){
-  const res = await fetch('/api/grades');
-  if(!res.ok) throw new Error('fetch /api/grades: ' + res.status);
+  const res = await fetch(API + '/grades');
+  if(!res.ok) throw new Error('fetch grades: ' + res.status);
   const rows = await res.json();
   const next = {};
   rows.forEach(v => { if(v && v.slug) next[v.slug] = normalize(v); });
@@ -1056,10 +1219,10 @@ LOCAL_BACKEND_JS = r"""async function fetchGrades(){
 }
 
 async function saveDoc(slug, body){
-  const res = await fetch('/api/grades/' + encodeURIComponent(slug), {
+  const res = await fetch(API + '/grades/' + encodeURIComponent(slug), {
     method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
   });
-  if(!res.ok) throw new Error('POST /api/grades: ' + res.status);
+  if(!res.ok) throw new Error('POST grade: ' + res.status);
 }
 
 $('#hide-reviewed').addEventListener('change', renderReel);
@@ -1069,6 +1232,7 @@ $('#btn-reweigh').addEventListener('click', openReweigh);
 
 async function boot(){
   renderStats();
+  renderPools();
   renderPeople();
   renderReel();
   try{ grades = await fetchGrades(); renderReel(); }
@@ -1083,7 +1247,7 @@ async function boot(){
   // A re-weigh started before a reload (or from another tab) keeps running
   // server-side -- resume watching it instead of leaving the button idle.
   try{
-    const d = await (await fetch('/api/reweigh')).json();
+    const d = await (await fetch(API + '/reweigh')).json();
     if(d.running){
       renderReweighShell();
       $('#reweigh-overlay').classList.add('open');

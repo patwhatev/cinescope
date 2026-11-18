@@ -1,24 +1,26 @@
-"""Merge graded rows into out/grades.csv, and write out/watchlist.csv.
+"""Write this pool's grades.csv (verdicts + channel snapshots for tune.py),
+and the profile's watchlist.csv.
 
-  python3 pipeline/pull_grades.py              -- read data/grades.db (self-hosted MODE=local)
-  python3 pipeline/pull_grades.py dump.json    -- read a JSON array (MODE=artifact: the
-    "grades" collection via the ArtifactData tool)
-  python3 pipeline/pull_grades.py dump_dir/    -- read a directory of <slug>.json docs
-    (same tool, with out_dir set)
+  python3 pipeline/pull_grades.py              -- read the profile's grades.db
+  python3 pipeline/pull_grades.py dump.json    -- first merge a JSON array of grade
+    docs into grades.db (MODE=artifact: the "grades" collection via ArtifactData)
+  python3 pipeline/pull_grades.py dump_dir/    -- same, from a directory of <slug>.json
 
-Each doc carries {slug, grade, status, rating, interest, never}: `status` is
-"seen" / "unseen" / null, and `grade` is the pre-split star (see
-common.verdict for how they combine).
+Each doc carries {slug, grade, status, rating, interest, never, pool}:
+`status` is "seen" / "unseen" / null, `pool` is the reel it was graded in
+(see common.verdict for how the rest combine, pools.assign for `pool`).
 """
 import csv
 import glob
 import json
 import os
-import sqlite3
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
+import pools
+
+P = common.paths()
 
 
 def load_dump(path):
@@ -32,16 +34,18 @@ def load_dump(path):
         return json.load(fh)
 
 
-def load_local_db():
-    path = os.path.join(common.DATA, "grades.db")
-    if not os.path.exists(path):
-        sys.exit("no data/grades.db yet -- grade something in the local server first, "
-                  "or pass an artifact dump path")
-    conn = sqlite3.connect(path)
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(grades)")]
-    rows = conn.execute("SELECT %s FROM grades" % ", ".join(cols)).fetchall()
+def merge_dump(docs):
+    conn = common.grades_db(P.profile)
+    for r in docs:
+        if not r.get("slug"):
+            continue
+        conn.execute(
+            "INSERT OR REPLACE INTO grades(%s) VALUES (%s)"
+            % (", ".join(common.GRADE_DB_COLUMNS), ", ".join("?" * len(common.GRADE_DB_COLUMNS))),
+            [r.get("slug"), r.get("title"), r.get("grade"), r.get("status"), r.get("rating"),
+             r.get("interest"), 1 if r.get("never") else 0, r.get("pool"), r.get("ts")])
+    conn.commit()
     conn.close()
-    return [dict(zip(cols, row)) for row in rows]
 
 
 def cell(v):
@@ -50,26 +54,29 @@ def cell(v):
 
 def main():
     dump_path = sys.argv[1] if len(sys.argv) > 1 else None
-    docs = load_dump(dump_path) if dump_path else load_local_db()
-    dump = {r["slug"]: r for r in docs}
-    source = dump_path or os.path.join(common.DATA, "grades.db")
-
-    with open(os.path.join(common.DATA, "scores.json"), encoding="utf-8") as fh:
-        S = json.load(fh)
-    byslug = {f["slug"]: (i + 1, f) for i, f in enumerate(S["films"])}
+    if dump_path:
+        merge_dump(load_dump(dump_path))
+    rows = common.read_db_grades(P.profile)
+    if not rows:
+        print("no grades yet in %s" % P.grades_db)
     recs = common.load_films()
+    assignment = pools.assign(P.profile, rows, recs)
+    sc = common.scale(common.config(P.pool))
 
-    existing = common.read_grades()
-    merged = dict(existing)
-    for slug, r in dump.items():
+    S = common.load_json(P.scores, {"films": []})
+    byslug = {f["slug"]: (i + 1, f) for i, f in enumerate(S["films"])}
+
+    existing = common.read_grades(P.grades_csv)
+    merged = {}
+    for slug, r in rows.items():
+        if assignment.get(slug) != P.pool:
+            continue
         rank, f = byslug.get(slug, (0, None))
         rec = recs.get(slug, {})
         old_row = existing.get(slug, {})
         # A promoted seed drops out of scores.json entirely (seeds aren't
-        # scored against themselves) -- without this fallback, every run
-        # after a film graduates to seeds.txt silently blanks the channel
-        # snapshot that tune.py needs to grade it, which was quietly
-        # erasing the hit-rate signal for your best-rated films.
+        # scored against themselves) -- keep its last channel snapshot, or
+        # tune.py loses the hit-rate signal for exactly the best-rated films.
         if f:
             row_rank, row_score, c = rank, f["score"], f["channels"]
         else:
@@ -79,7 +86,7 @@ def main():
         status = r.get("status")
         merged[slug] = {
             "rank": row_rank, "slug": slug,
-            "title": (f or rec).get("title") or old_row.get("title") or slug,
+            "title": (f or rec).get("title") or r.get("title") or slug,
             "year": (f or rec).get("year") or old_row.get("year") or "",
             "score": row_score,
             "g": c["g"], "t": c["t"], "p": c["p"], "q": c["q"],
@@ -87,8 +94,14 @@ def main():
             "seen": {"seen": "y", "unseen": "n"}.get(status, ""),
             "rating": cell(r.get("rating")), "interest": cell(r.get("interest")),
             "never": "y" if r.get("never") else "",
+            "pool": P.pool,
             "note": old_row.get("note", ""),
         }
+    # Ungraded rows report.py wrote (the current top slice) stay, so the
+    # sheet still lines up with the reel.
+    for slug, old in existing.items():
+        if slug not in merged and slug not in rows:
+            merged[slug] = old
 
     def rank_key(s):
         try:
@@ -97,8 +110,8 @@ def main():
             r = 0
         return (r == 0, r)
 
-    gpath = os.path.join(common.OUT, "grades.csv")
-    with open(gpath, "w", encoding="utf-8", newline="") as fh:
+    os.makedirs(P.pool_dir, exist_ok=True)
+    with open(P.grades_csv, "w", encoding="utf-8", newline="") as fh:
         wr = csv.DictWriter(fh, fieldnames=common.GRADE_COLS, extrasaction="ignore")
         wr.writeheader()
         for slug in sorted(merged, key=rank_key):
@@ -106,29 +119,31 @@ def main():
 
     kinds = {}
     for r in merged.values():
-        v = common.verdict(r)
+        v = common.verdict(r, sc)
         if v:
             kinds[v[0]] = kinds.get(v[0], 0) + 1
-    print("merged %d rows from %s into %s (%d total rows)"
-          % (len(dump), source, gpath, len(merged)))
+    print("[%s/%s] %d of %d profile grades belong to this pool -> %s"
+          % (P.profile, P.pool, sum(1 for s in rows if assignment.get(s) == P.pool),
+             len(rows), P.grades_csv))
     print("  seen+rated %d · unseen interest %d · never %d · untriaged old grade %d"
           % tuple(kinds.get(k, 0) for k in ("rating", "interest", "never", "legacy")))
 
-    # Watchlist: unseen, interest >= 3, most wanted first.
+    # Watchlist: profile-wide, unseen at hit_min+, most wanted first.
     watch = []
-    for r in merged.values():
-        v = common.verdict(r)
-        if v and v[0] == "interest" and v[1] >= 3:
-            watch.append((v[1], float(r["score"] or 0), r))
-    watch.sort(key=lambda x: (-x[0], -x[1]))
-    wpath = os.path.join(common.OUT, "watchlist.csv")
-    with open(wpath, "w", encoding="utf-8", newline="") as fh:
+    for slug, r in rows.items():
+        v = common.verdict(r, sc)
+        if v and v[0] == "interest" and v[1] >= sc["hit_min"]:
+            rec = recs.get(slug, {})
+            watch.append((v[1], slug, rec.get("title") or r.get("title") or slug,
+                          rec.get("year") or "", assignment.get(slug) or ""))
+    watch.sort(key=lambda x: (-x[0], x[2]))
+    with open(P.watchlist, "w", encoding="utf-8", newline="") as fh:
         wr = csv.writer(fh)
-        wr.writerow(["interest", "title", "year", "score", "slug", "letterboxd"])
-        for interest, _, r in watch:
-            wr.writerow([int(interest), r["title"], r["year"], r["score"], r["slug"],
-                         "https://letterboxd.com/film/%s/" % r["slug"]])
-    print("wrote %s (%d films)" % (wpath, len(watch)))
+        wr.writerow(["interest", "title", "year", "pool", "slug", "letterboxd"])
+        for interest, slug, title, year, pool in watch:
+            wr.writerow([int(interest), title, year, pool, slug,
+                         "https://letterboxd.com/film/%s/" % slug])
+    print("wrote %s (%d films)" % (P.watchlist, len(watch)))
 
 
 if __name__ == "__main__":

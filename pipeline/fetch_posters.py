@@ -18,12 +18,14 @@ OUTDIR = os.path.join(common.DATA, "posters")
 
 
 def main():
-    with open(os.path.join(common.DATA, "scores.json"), encoding="utf-8") as fh:
+    P = common.paths()
+    cfg = common.config(P.pool)
+    with open(P.scores, encoding="utf-8") as fh:
         S = json.load(fh)
     films = common.load_films()
-    top = int(os.environ.get("BUILD_TOP", "80"))
-    slugs = [f["slug"] for f in common.select_for_reel(S["films"], top)]
-    slugs += common.triage_slugs(slugs)
+    top = int(os.environ.get("BUILD_TOP") or cfg.get("reel_size", 80))
+    slugs = [f["slug"] for f in common.select_for_reel(S["films"], top, cfg)]
+    slugs += common.triage_slugs(slugs, P.pool, P.profile)
 
     os.makedirs(OUTDIR, exist_ok=True)
     got = skip = miss = 0

@@ -1,0 +1,57 @@
+{
+  "_doc": "Neutral starting settings for every profile. Override any key in profiles/<name>/profile.json under \"settings\" (person-wide) or pools.<pool>.settings (one pool). Nothing here encodes a taste: no genre, era or popularity lean.",
+  "scale": "standard",
+  "weights": {
+    "graph": 0.3,
+    "theme": 0.3,
+    "people": 0.25,
+    "quality": 0.15
+  },
+  "token_weights": {
+    "mini_theme": 1.0,
+    "theme": 0.8,
+    "genre": 0.35
+  },
+  "graph_decay": 0.42,
+  "seed_obscurity_bonus": 0.0,
+  "bayes_prior_count": 2000,
+  "bayes_prior_rating": 3.2,
+  "min_rating_count": 600,
+  "popularity_pivot": 20000,
+  "popularity_lean": 0.0,
+  "popularity_clamp": [0.62, 1.25],
+  "person_boost": {},
+  "person_repeat_decay": 0.3,
+  "people_gate_floor": 0.5,
+  "reel_director_decay": 0.7,
+  "reel_director_cap": null,
+  "never_penalty": {
+    "graph": 0.6,
+    "theme": 0.8,
+    "people": 0.6
+  },
+  "cross_pool_theme_penalty": 0.4,
+  "anchors": {
+    "positive": {"rating": 0.45, "interest": 0.35},
+    "negative": {"never": 1.0, "rating": 0.5, "interest": 0.15}
+  },
+  "junk": {
+    "max_directors": null,
+    "short_max_runtime": 40,
+    "short_min_rating_count": 5000,
+    "short_min_rating": 3.7
+  },
+  "crawl": {
+    "depth2_metadata_budget": 320,
+    "person_count": 14,
+    "person_film_budget": 60,
+    "person_cap_per_crawl": 10,
+    "opportunity_count": 4,
+    "opportunity_min_score": 55
+  },
+  "tune": {
+    "min_rows": 30,
+    "learning_rate": 0.6
+  },
+  "reel_size": 80
+}

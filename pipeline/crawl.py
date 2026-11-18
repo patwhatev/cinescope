@@ -15,8 +15,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
 import fetch
 import parse
+import pools
 
-CFG = common.config()
+P = common.paths()
+CFG = common.config(P.pool)
 
 
 def grab(slug, films, note=""):
@@ -50,19 +52,39 @@ def person_films(kind, slug):
 
 def main():
     films = common.load_films()
-    seedlist = common.seeds()
+    seedlist = common.read_seeds(P.seeds)
+    if not seedlist:
+        sys.exit("pool %r has no seeds yet -- add some to %s" % (P.pool, P.seeds))
     seed_slugs = [s for s, _ in seedlist]
     wmap = dict(seedlist)
 
-    print("phase 1: %d seeds" % len(seed_slugs), flush=True)
+    print("[%s/%s] phase 1: %d seeds" % (P.profile, P.pool, len(seed_slugs)), flush=True)
     for s in seed_slugs:
         grab(s, films, "(seed)")
+    seed_slugs = [s for s in seed_slugs if not films[s].get("dead")]
 
-    print("phase 2: depth-1 neighbours", flush=True)
+    # Every graded film in the profile needs metadata before pools can be
+    # told apart (a letterboxd import, say, is mostly films the crawl has
+    # never reached) -- fetch them first, then work out which are this
+    # pool's anchors.
+    rows = common.read_db_grades(P.profile)
+    for s in rows:
+        if s not in films:
+            grab(s, films, "(graded)")
+    assignment = pools.assign(P.profile, rows, films)
+    # This pool's hits widen the graph walk (lighter than seeds); this is
+    # what turns "around the seeds" into a constellation.
+    pos_anchor, neg_anchor, _ = common.anchors(P.pool, P.profile, assignment)
+    anchor_slugs = [s for s in pos_anchor if not films[s].get("dead") and s not in wmap]
+    sources = seed_slugs + anchor_slugs
+    wmap = dict(wmap, **{s: pos_anchor[s] for s in anchor_slugs})
+
+    print("phase 2: depth-1 neighbours (%d seeds + %d liked anchors)"
+          % (len(seed_slugs), len(anchor_slugs)), flush=True)
     depth1 = []
-    for s in seed_slugs:
+    for s in sources:
         for n in films[s]["similar"]:
-            if n not in seed_slugs and n not in depth1:
+            if n not in sources and n not in depth1:
                 depth1.append(n)
     print("  %d unique" % len(depth1), flush=True)
     for n in depth1:
@@ -71,7 +93,7 @@ def main():
     print("phase 3: depth-2 convergence", flush=True)
     # Preliminary score: how many seeds reach this film, decayed by distance.
     reach = collections.defaultdict(dict)
-    for s in seed_slugs:
+    for s in sources:
         w = wmap[s]
         for n in films[s]["similar"]:
             reach[n][s] = max(reach[n].get(s, 0), w)
@@ -88,11 +110,10 @@ def main():
 
     print("phase 4: people expansion", flush=True)
     # Repeat-seed decay: a person's 2nd, 3rd... seed film is confirming
-    # evidence, not a fresh multiplier -- without this, having 4 Cronenberg
-    # seeds gave Cronenberg 4x a single-seed director's crawl priority,
-    # which is how one or two prolific favorites end up burying everyone
-    # else's filmography in budget (observed: 91 Lynch + 77 Miike entries
-    # in one 917-film pool). Each person's own repeat count decays
+    # evidence, not a fresh multiplier -- without this, four seeds by one
+    # director gave them 4x a single-seed director's crawl priority, which
+    # is how one or two prolific favorites end up burying everyone else's
+    # filmography in budget. Each person's own repeat count decays
     # independently, cast/writer/director each have their own counter.
     decay = CFG.get("person_repeat_decay", 0.3)
     aff = collections.Counter()
@@ -112,10 +133,19 @@ def main():
             key = ("actor", p)
             aff[key] += w * 0.45 * (0.85 ** i) * (decay ** repeats[key]); repeats[key] += 1
             role[p] = name
-    for slug, boost in CFG["person_boost"].items():
+    for slug, boost in (CFG.get("person_boost") or {}).items():
         for kind in ("director", "actor"):
             if (kind, slug) in aff:
                 aff[(kind, slug)] += boost
+    # Directors of your nevers lose crawl priority the same way score.py
+    # penalises them, so their filmographies stop eating the budget.
+    neg_dir, nrep = collections.Counter(), collections.Counter()
+    for s, w in neg_anchor.items():
+        for p, _ in (films.get(s) or {}).get("directors") or []:
+            neg_dir[p] += w * (decay ** nrep[p]); nrep[p] += 1
+    for (kind, p) in list(aff):
+        if kind == "director" and neg_dir.get(p):
+            aff[(kind, p)] -= CFG.get("never_penalty", {}).get("people", 0.6) * neg_dir[p]
     top = [kv for kv in aff.most_common() if kv[1] >= 0.5][:CFG["crawl"]["person_count"]]
     print("  top people: %s" % ", ".join("%s(%s,%.2f)" % (role.get(p, p), k[:3], v)
                                          for (k, p), v in top), flush=True)
@@ -123,12 +153,12 @@ def main():
     # Opportunity people: a single strong hit in last run's scored pool,
     # not already a seed or already covered above, whose filmography has
     # never been explored -- the other side of the same fix, spending some
-    # of the budget freed up on genuine discovery instead of just more
-    # Lynch/Miike. Needs a prior data/scores.json; the first-ever crawl has
-    # none yet and simply skips this.
+    # of the budget freed up on genuine discovery instead of more of the
+    # same favorites. Needs a prior scores.json for this pool; the first
+    # crawl has none yet and simply skips this.
     opp_n = CFG["crawl"].get("opportunity_count", 0)
     opp_min = CFG["crawl"].get("opportunity_min_score", 1e9)
-    prev_path = os.path.join(common.DATA, "scores.json")
+    prev_path = P.scores
     if opp_n and os.path.exists(prev_path):
         with open(prev_path, encoding="utf-8") as fh:
             prev = json.load(fh)
@@ -178,7 +208,8 @@ def main():
         grab(f, films, "(person)")
 
     common.save_films(films)
-    with open(os.path.join(common.DATA, "people.json"), "w", encoding="utf-8") as fh:
+    os.makedirs(P.pool_dir, exist_ok=True)
+    with open(P.people, "w", encoding="utf-8") as fh:
         json.dump({"affinity": [{"kind": k, "slug": p, "name": role.get(p, p),
                                  "score": round(v, 3)}
                                 for (k, p), v in aff.most_common(60)]},

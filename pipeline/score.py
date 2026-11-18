@@ -1,22 +1,30 @@
-"""Score every crawled film against the seed profile.
+"""Score every crawled film against one pool's seeds.
 
 Four independent channels, each normalised by its own 95th percentile so the
-config weights mean what they say and stay comparable when tuning:
+weights mean what they say and stay comparable when tuning:
 
-  graph    how many of your seeds converge on this film, decayed by distance.
-           This is the co-occurrence signal: letterboxd's similarity edges are
-           themselves distilled from list/rating overlap, so breadth of seed
-           convergence is the thing being measured, not raw edge count.
-  theme    cosine between the film's idf-weighted theme vector and the centroid
-           of your seeds. Mini-themes carry the taste shape; genre is coarse.
-  people   director/writer/cast overlap with the people your seeds over-represent.
+  graph    how many of the pool's seeds converge on this film, decayed by
+           distance. Letterboxd's similarity edges are themselves distilled
+           from list/rating overlap, so breadth of convergence is the signal.
+  theme    cosine between the film's idf-weighted theme vector and the
+           centroid of the pool's seeds. Mini-themes carry the shape; genre
+           is coarse.
+  people   director/writer/cast overlap with the people the seeds
+           over-represent. Gated by graph/theme: a shared director only
+           counts in full when the film is also *like* the pool -- otherwise
+           every stray side-project of a favorite outranks its neighbours.
   quality  letterboxd rating, shrunk toward the global mean by rating count.
 
-A popularity adjustment then damps films so canonical they sit adjacent to
-everything, and lifts the deep cuts, because that is where this profile lives.
+Grading feeds in beyond the seed set (common.anchors): this pool's hits are
+extra, lighter graph/theme sources, so the reel fans out across what you
+like here. Nevers and dislikes from *every* pool push away -- letterboxd-
+similar to a never, the flavour of theme that sets nevers apart from this
+pool, and the people in them.
+
+`popularity_lean` then tilts by rating count: positive lifts lesser-known
+films, negative favours well-known ones, 0 leaves them alone.
 """
 import collections
-import csv
 import json
 import math
 import os
@@ -24,8 +32,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
+import pools
+from vectors import ThemeSpace, dot, unit
 
-CFG = common.config()
+P = common.paths()
+CFG = common.config(P.pool)
 
 
 def pct(values, p):
@@ -36,50 +47,34 @@ def pct(values, p):
     return xs[i] or 1.0
 
 
-def tokens(rec, tw):
-    out = {}
-    for key, w in (("mini_themes", tw["mini_theme"]), ("themes", tw["theme"]),
-                   ("genres", tw["genre"])):
-        for slug, name in rec.get(key) or []:
-            out["%s:%s" % (key, slug)] = max(out.get("%s:%s" % (key, slug), 0), w)
-    return out
-
-
-def unit(vec):
-    n = math.sqrt(sum(v * v for v in vec.values()))
-    return {k: v / n for k, v in vec.items()} if n else {}
-
-
 def popnorm(count):
     if not count:
         return 0.0
     return min(1.0, max(0.0, (math.log10(count) - 3.5) / 3.0))
 
 
-def graded():
-    """Films you have already judged — excluded from new recommendations."""
-    path = os.path.join(common.OUT, "grades.csv")
-    out = {}
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as fh:
-            for row in csv.DictReader(fh):
-                v = common.verdict(row)
-                seen = (row.get("seen") or "").strip().lower() in ("y", "yes", "1", "true")
-                if v or seen:
-                    out[row["slug"]] = {"grade": v[1] if v else None, "seen": seen}
-    return out
-
-
 def main():
     films = common.load_films()
-    seedlist = common.seeds()
+    seedlist = common.read_seeds(P.seeds)
+    if not seedlist:
+        sys.exit("pool %r has no seeds yet -- add some to %s" % (P.pool, P.seeds))
     wmap = dict(seedlist)
-    seed_slugs = [s for s, _ in seedlist if s in films]
-    tw = CFG["token_weights"]
-    done = graded()
+    seed_slugs = [s for s, _ in seedlist if s in films and not films[s].get("dead")]
+    seedset = set(seed_slugs)
 
-    # Seeds you rate more obscurely are more diagnostic of idiosyncratic taste,
-    # so they pull harder than the canon entries everybody has seen.
+    rows_db = common.read_db_grades(P.profile)
+    assignment = pools.assign(P.profile, rows_db, films)
+    done = {s for s, r in rows_db.items()
+            if common.verdict(r) or common._seen(r.get("status"))}
+    pos_anchor, neg_anchor, neg_home = common.anchors(P.pool, P.profile, assignment)
+    pos_anchor = {s: w for s, w in pos_anchor.items() if s in films and s not in seedset
+                  and not films[s].get("dead")}
+    neg_anchor = {s: w for s, w in neg_anchor.items() if s in films and not films[s].get("dead")}
+    NEG = CFG["never_penalty"]
+    cross = CFG.get("cross_pool_theme_penalty", 1.0)
+
+    # Optional: lesser-known seeds pull harder than the canon entries
+    # everybody has seen (0 by default -- a taste assumption, not a fact).
     eff = {}
     for s in seed_slugs:
         bonus = CFG["seed_obscurity_bonus"] * (1 - popnorm(films[s].get("rating_count")))
@@ -88,70 +83,90 @@ def main():
     # ---- channel: graph convergence -------------------------------------
     decay = CFG["graph_decay"]
     reach = collections.defaultdict(dict)
-    for s in seed_slugs:
+    sources = [(s, eff[s]) for s in seed_slugs] + list(pos_anchor.items())
+    for s, w in sources:
         for n in films[s]["similar"]:
-            reach[n][s] = max(reach[n].get(s, 0), eff[s])
+            reach[n][s] = max(reach[n].get(s, 0), w)
             for m in films.get(n, {}).get("similar", []):
-                reach[m][s] = max(reach[m].get(s, 0), eff[s] * decay)
-    # Shared-person edges extend reach to filmography films no seed points at.
-    # Repeat-seed decay (matches crawl.py): a person's 2nd, 3rd... seed film
-    # confirms the affinity rather than multiplying it, so having several
-    # seeds by one director doesn't drown out people with just one or two.
-    decay = CFG.get("person_repeat_decay", 0.3)
+                reach[m][s] = max(reach[m].get(s, 0), w * decay)
+    # Negative reach: one hop only -- letterboxd's own "similar to the thing
+    # you said never to" is direct evidence; two hops out it's just noise.
+    neg_reach = collections.Counter()
+    for s, w in neg_anchor.items():
+        for n in films[s]["similar"]:
+            neg_reach[n] += w
+
+    # Shared-person edges. Repeat-seed decay (matches crawl.py): a person's
+    # 2nd, 3rd... seed film confirms the affinity rather than multiplying it,
+    # so a few prolific favorites can't drown out everyone else.
+    rdecay = CFG["person_repeat_decay"]
     seed_people = collections.Counter()
     pname = {}
     repeats = collections.Counter()
     for s in seed_slugs:
         for p, nm in films[s]["directors"]:
             key = ("d", p)
-            seed_people[p] += eff[s] * 1.0 * (decay ** repeats[key]); repeats[key] += 1
+            seed_people[p] += eff[s] * 1.0 * (rdecay ** repeats[key]); repeats[key] += 1
             pname[p] = nm
         for p, nm in films[s]["writers"]:
             key = ("w", p)
-            seed_people[p] += eff[s] * 0.5 * (decay ** repeats[key]); repeats[key] += 1
+            seed_people[p] += eff[s] * 0.5 * (rdecay ** repeats[key]); repeats[key] += 1
             pname[p] = nm
         for i, (p, nm) in enumerate(films[s]["cast"][:12]):
             key = ("c", p)
-            seed_people[p] += eff[s] * 0.45 * (0.85 ** i) * (decay ** repeats[key]); repeats[key] += 1
+            seed_people[p] += eff[s] * 0.45 * (0.85 ** i) * (rdecay ** repeats[key]); repeats[key] += 1
             pname[p] = nm
-    for slug, boost in CFG["person_boost"].items():
+    for slug, boost in (CFG.get("person_boost") or {}).items():
         if slug in seed_people:
             seed_people[slug] += boost
+    # People in nevers: same repeat decay, so one bad film by a favorite
+    # tempers them; a run of nevers by one director cancels them out.
+    neg_people = collections.Counter()
+    nrep = collections.Counter()
+    for s, w in neg_anchor.items():
+        for p, _ in films[s]["directors"]:
+            neg_people[p] += w * 1.0 * (rdecay ** nrep[p]); nrep[p] += 1
+        for i, (p, _) in enumerate(films[s]["cast"][:4]):
+            neg_people[p] += w * 0.3 * (0.85 ** i) * (rdecay ** nrep[p]); nrep[p] += 1
 
     # ---- channel: theme vector ------------------------------------------
-    corpus = [r for r in films.values() if not r.get("dead")]
-    df = collections.Counter()
-    for r in corpus:
-        for t in tokens(r, tw):
-            df[t] += 1
-    N = max(1, len(corpus))
-    idf = {t: math.log(1 + N / (1 + d)) for t, d in df.items()}
+    space = ThemeSpace(films, CFG["token_weights"])
+    centroid = space.centroid((films[s], w) for s, w in sources)
 
-    centroid = collections.defaultdict(float)
-    for s in seed_slugs:
-        v = unit({t: w * idf.get(t, 1.0) for t, w in tokens(films[s], tw).items()})
-        for t, val in v.items():
-            centroid[t] += eff[s] * val
-    centroid = unit(centroid)
+    # What sets nevers apart from this pool, not what they share with it:
+    # nevers were recommended for a reason, so their raw centroid overlaps
+    # the pool's and penalising it would penalise the pool itself. Project
+    # the shared direction out and keep the remainder. Nevers given in a
+    # different pool count for less here -- a bad comedy says little about
+    # which slow dramas to skip.
+    neg_c = space.centroid(
+        (films[s], w * (1.0 if neg_home.get(s) in (None, P.pool) else cross))
+        for s, w in neg_anchor.items())
+    overlap = dot(neg_c, centroid)
+    neg_resid = unit({t: neg_c.get(t, 0) - overlap * centroid.get(t, 0)
+                      for t in set(neg_c) | set(centroid)})
 
     # ---- assemble --------------------------------------------------------
     rows = []
     for slug, rec in films.items():
-        if rec.get("dead") or slug in seed_slugs:
+        if rec.get("dead") or slug in seedset:
             continue
-        if common.is_junk(rec, CFG["min_rating_count"]):
+        if common.is_junk(rec, CFG):
             continue
 
         g_detail = sorted(reach.get(slug, {}).items(), key=lambda kv: -kv[1])
-        g_raw = sum(v for _, v in g_detail)
+        g_raw = max(0.0, sum(v for _, v in g_detail) - NEG["graph"] * neg_reach.get(slug, 0))
 
-        tv = unit({t: w * idf.get(t, 1.0) for t, w in tokens(rec, tw).items()})
-        t_raw = sum(tv.get(t, 0) * centroid.get(t, 0) for t in tv)
+        tv = space.vec(rec)
+        t_pos = dot(tv, centroid)
+        t_neg = max(0.0, dot(tv, neg_resid))
+        t_raw = max(0.0, t_pos - NEG["theme"] * t_neg)
         shared = sorted(((centroid.get(t, 0) * tv[t], t) for t in tv if t in centroid),
                         reverse=True)
 
         p_raw, p_detail = 0.0, []
         for p, nm in rec["directors"]:
+            p_raw -= NEG["people"] * neg_people.get(p, 0)
             if seed_people.get(p):
                 p_raw += seed_people[p] * 1.0
                 p_detail.append("dir:" + nm)
@@ -163,7 +178,9 @@ def main():
             if seed_people.get(p):
                 p_raw += seed_people[p] * 0.45 * (0.85 ** i)
                 p_detail.append("cast:" + nm)
-        p_raw = math.log1p(p_raw)
+        for i, (p, _) in enumerate(rec["cast"][:4]):
+            p_raw -= NEG["people"] * 0.3 * neg_people.get(p, 0) * (0.85 ** i)
+        p_raw = math.log1p(max(0.0, p_raw))
 
         v, R = rec.get("rating_count") or 0, rec.get("rating") or 0
         m, C = CFG["bayes_prior_count"], CFG["bayes_prior_rating"]
@@ -179,15 +196,19 @@ def main():
     qlo, qhi = 2.6, 4.35
     W = CFG["weights"]
     lo, hi = CFG["popularity_clamp"]
+    lean = CFG.get("popularity_lean", 0.0)
 
+    gate_floor = CFG.get("people_gate_floor", 1.0)
     for r in rows:
         r["g"] = min(1.25, r["g_raw"] / g95)
         r["t"] = min(1.25, r["t_raw"] / t95)
-        r["p"] = min(1.25, r["p_raw"] / p95)
+        # People only count in full when corroborated by graph or theme.
+        rel = min(1.0, max(r["g"], r["t"]) / 0.8)
+        gate = gate_floor + (1 - gate_floor) * rel
+        r["p"] = min(1.25, r["p_raw"] / p95) * gate
         r["q"] = min(1.25, max(0.0, (r["q_raw"] - qlo) / (qhi - qlo)))
         cnt = r["rec"].get("rating_count") or 1
-        r["pop_adj"] = min(hi, max(lo, 1.0 - CFG["popularity_slope"]
-                                   * math.log10(cnt / float(CFG["popularity_pivot"]))))
+        r["pop_adj"] = min(hi, max(lo, 1.0 - lean * math.log10(cnt / float(CFG["popularity_pivot"]))))
         r["score"] = 100 * r["pop_adj"] * (
             W["graph"] * r["g"] + W["theme"] * r["t"]
             + W["people"] * r["p"] + W["quality"] * r["q"])
@@ -195,8 +216,9 @@ def main():
 
     rows.sort(key=lambda r: -r["score"])
     payload = {
+        "profile": P.profile, "pool": P.pool,
         "seed_count": len(seed_slugs),
-        "pool": len(films),
+        "pool_size": len(films),
         "scored": len(rows),
         "people": [{"slug": p, "name": pname.get(p, p), "score": round(v, 3)}
                    for p, v in seed_people.most_common(40)],
@@ -220,11 +242,13 @@ def main():
             "cast_billed": r["rec"].get("cast_billed") or [n for _, n in (r["rec"].get("cast") or [])[:6]],
         } for r in rows],
     }
-    os.makedirs(common.DATA, exist_ok=True)
-    with open(os.path.join(common.DATA, "scores.json"), "w", encoding="utf-8") as fh:
+    os.makedirs(P.pool_dir, exist_ok=True)
+    with open(P.scores, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=1, ensure_ascii=False)
-    print("scored %d candidates from a pool of %d (seeds=%d)"
-          % (len(rows), len(films), len(seed_slugs)))
+    print("[%s/%s] scored %d candidates from a pool of %d (seeds=%d, +%d liked anchors, "
+          "%d never/disliked pushing away)"
+          % (P.profile, P.pool, len(rows), len(films), len(seed_slugs), len(pos_anchor),
+             len(neg_anchor)))
     for r in rows[:15]:
         print("  %6.2f  %-44s g=%.2f t=%.2f p=%.2f q=%.2f pop=%.2f"
               % (r["score"], common.label(r["rec"])[:44],

@@ -9,7 +9,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
 
-CFG = common.config()
+P = common.paths()
+CFG = common.config(P.pool)
 TOP = int(os.environ.get("TOP", "40"))
 
 
@@ -22,7 +23,7 @@ def why(f):
     bits = []
     if f["via_seeds"]:
         names = ", ".join(s for s, _ in f["via_seeds"][:3])
-        bits.append("converges from %d of your seeds (%s)" % (len(f["via_seeds"]), names))
+        bits.append("converges from %d seeds (%s)" % (len(f["via_seeds"]), names))
     if f["shared_tokens"]:
         bits.append("shares: %s" % "; ".join(f["shared_tokens"][:2]).lower())
     if f["via_people"]:
@@ -31,24 +32,24 @@ def why(f):
 
 
 def main():
-    with open(os.path.join(common.DATA, "scores.json"), encoding="utf-8") as fh:
+    with open(P.scores, encoding="utf-8") as fh:
         S = json.load(fh)
     films = [f for f in S["films"] if not f["already_graded"]]
-    itr = os.environ.get("ITER", "01")
+    itr = os.environ.get("ITER") or common.next_iteration(P.reports)
     L = []
     w = L.append
 
-    w("# Cinescope — iteration %s" % itr)
+    w("# Cinescope — %s / %s — iteration %s" % (P.profile, P.pool, itr))
     w("")
-    w("Pool: **%d films** crawled from letterboxd · **%d** scored as candidates · "
-      "**%d seeds**." % (S["pool"], S["scored"], S["seed_count"]))
+    w("**%d films** crawled from letterboxd · **%d** scored as candidates · "
+      "**%d seeds** in this pool." % (S["pool_size"], S["scored"], S["seed_count"]))
     w("")
     w("Channel weights: " + ", ".join("`%s %.2f`" % (k, v)
                                       for k, v in CFG["weights"].items()))
     w("")
     w("`g` graph convergence · `t` theme-vector cosine · `p` people overlap · "
-      "`q` shrunk rating · `pop` popularity adjustment (>1 lifts deep cuts, "
-      "<1 damps the over-canonical).")
+      "`q` shrunk rating · `pop` popularity adjustment (from `popularity_lean`; "
+      "1.00 = no tilt).")
     w("")
 
     w("## Top %d" % TOP)
@@ -97,7 +98,7 @@ def main():
 
     w("## People to explore")
     w("")
-    w("Affinity = how strongly your seed set over-represents this person "
+    w("Affinity = how strongly this pool's seeds over-represent this person "
       "(director 1.0, writer 0.5, cast 0.45 decayed by billing).")
     w("")
     byslug = {f["slug"]: f for f in films}
@@ -128,12 +129,12 @@ def main():
                 (f["mini_themes"] or ["—"])[0], ", ".join(f["directors"]) or "—"))
         w("")
 
-    os.makedirs(common.OUT, exist_ok=True)
-    path = os.path.join(common.OUT, "iteration-%s.md" % itr)
+    os.makedirs(P.reports, exist_ok=True)
+    path = os.path.join(P.reports, "iteration-%s.md" % itr)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("\n".join(L) + "\n")
 
-    gpath = os.path.join(common.OUT, "grades.csv")
+    gpath = P.grades_csv
     existing = {}
     if os.path.exists(gpath):
         with open(gpath, encoding="utf-8") as fh:
@@ -144,19 +145,19 @@ def main():
         wr = csv.DictWriter(fh, fieldnames=cols)
         wr.writeheader()
         rank = 0
+        top_slugs = {f["slug"] for f in S["films"][:TOP]}
         for f in S["films"][:TOP]:
             rank += 1
             old = existing.get(f["slug"], {})
             c = f["channels"]
             row = {k: old.get(k, "") for k in cols}
             row.update({"rank": rank, "slug": f["slug"], "title": f["title"],
-                        "year": f["year"], "score": f["score"],
+                        "year": f["year"], "score": f["score"], "pool": P.pool,
                         "g": c["g"], "t": c["t"], "p": c["p"], "q": c["q"]})
             wr.writerow(row)
         # keep any rows you already graded that are no longer in the top slice
         for slug, old in existing.items():
-            if slug not in {f["slug"] for f in S["films"][:TOP]} and (
-                    common.verdict(old) or old.get("seen")):
+            if slug not in top_slugs and (common.verdict(old) or old.get("seen")):
                 wr.writerow({k: old.get(k, "") for k in cols})
 
     print("wrote %s" % path)

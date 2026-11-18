@@ -1,11 +1,10 @@
-"""Append newly-kept films (seen and rated >= 4 in out/grades.csv, or an
-untriaged old grade >= 4) to KEEPERS.md.
+"""Append newly-kept films (seen and rated into a seed tier, in any pool) to
+the profile's KEEPERS.md.
 
 Idempotent: a slug already anywhere in KEEPERS.md is skipped, so re-running
 after pull_grades.py only ever adds the delta. Run order each round:
   pull_grades.py  ->  tune.py  ->  update_keepers.py
 """
-import csv
 import datetime
 import os
 import re
@@ -13,8 +12,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common
+import pools
 
-PATH = os.path.join(common.ROOT, "KEEPERS.md")
+P = common.paths()
+PATH = P.keepers
 
 
 def existing_slugs(text):
@@ -24,11 +25,18 @@ def existing_slugs(text):
 
 
 def main():
-    gpath = os.path.join(common.OUT, "grades.csv")
-    if not os.path.exists(gpath):
-        sys.exit("no grades.csv yet")
-    with open(gpath, encoding="utf-8") as fh:
-        rows = [r for r in csv.DictReader(fh) if common.seed_tier(r)]
+    sc = common.scale(common.config())
+    db = common.read_db_grades(P.profile)
+    films = common.load_films()
+    assignment = pools.assign(P.profile, db, films)
+    rows = []
+    for slug, r in db.items():
+        tier = common.seed_tier(r, sc)
+        if tier:
+            rec = films.get(slug) or {}
+            rows.append({"slug": slug, "tier": tier, "pool": assignment.get(slug) or "",
+                         "title": rec.get("title") or r.get("title") or slug,
+                         "year": rec.get("year") or ""})
 
     text = open(PATH, encoding="utf-8").read() if os.path.exists(PATH) else (
         "# Keepers\n\nThe running list of films confirmed via Dailies grading.\n")
@@ -38,17 +46,20 @@ def main():
         print("nothing new — %d kept films already on the list" % len(have))
         return
 
-    new.sort(key=lambda r: (-common.seed_tier(r), -float(r["score"] or 0)))
+    new.sort(key=lambda r: (r["pool"], -r["tier"], r["title"]))
     iters = len(re.findall(r"^## Iteration", text, re.M))
     today = datetime.date.today().isoformat()
     lines = ["\n## Iteration %02d — %s, %d newly kept\n" % (iters + 1, today, len(new)),
-              "| Film | Year | Weight | Score | |", "|---|---|---|---|---|"]
+              "| Film | Year | Pool | Weight | |", "|---|---|---|---|---|"]
     for r in new:
-        weight = "heavy (1.0)" if common.seed_tier(r) == 1.0 else "light (0.5)"
+        weight = "%s (%.1f)" % ("heavy" if r["tier"] >= 1.0 else "light", r["tier"])
         lines.append("| %s | %s | %s | %s | <!--slug:%s--> |"
-                      % (r["title"], r["year"], weight, r["score"], r["slug"]))
+                      % (r["title"], r["year"], r["pool"], weight, r["slug"]))
 
+    fresh = not os.path.exists(PATH)
     with open(PATH, "a", encoding="utf-8") as fh:
+        if fresh:
+            fh.write(text.rstrip("\n") + "\n")
         fh.write("\n".join(lines) + "\n")
     print("appended %d newly kept films to %s (iteration %02d)" % (len(new), PATH, iters + 1))
 
